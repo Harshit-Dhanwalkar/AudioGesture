@@ -20,6 +20,11 @@ make                              # configure + build
 make run AUDIO=sample.wav         # or:  ./build/gesture_grain sample.wav [camera_index | video_file]
 ```
 
+Debug mode:
+```sh
+HAND_DEBUG=1 ./build/gesture_grain audio/file_example_WAV_2MG.wav 2>&1 | grep -E '\[palm\]|\[lm\]'
+```
+
 If `models/` is empty the app says so and falls back to the old skin-colour tracker (`--skin` forces it).
 `make clean`, `make distclean`, `make rebuild`, `make help` as before.
 

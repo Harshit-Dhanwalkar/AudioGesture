@@ -274,6 +274,15 @@ LandmarkHandTracker::detectPalms(const cv::Mat &bgr) {
     result.push_back(p);
   }
 
+  if (std::getenv("HAND_DEBUG")) {
+    std::fprintf(stderr, "[palm] %zu candidates\n", result.size());
+    for (size_t i = 0; i < std::min(result.size(), size_t(3)); ++i) {
+      std::fprintf(stderr, "[palm] #%zu score=%.3f box=(%.0f,%.0f %.0fx%.0f)\n",
+                   i, result[i].score, result[i].box.x, result[i].box.y,
+                   result[i].box.width, result[i].box.height);
+    }
+  }
+
   palmMs_ = nowMs() - t0;
   return result;
 }
@@ -339,12 +348,14 @@ bool LandmarkHandTracker::runLandmarks(
 
   const double t0 = nowMs();
 
-  // Affine map  crop pixel (u,v) -> source pixel:  p = C + R * k * ((u,v) -
-  // 112) (k = source pixels per crop pixel).  warpAffine with WARP_INVERSE_MAP
-  // takes exactly this dst->src matrix and does rotate + scale + crop in one
+  // Affine map crop pixel (u,v) -> source pixel: p = C + R * k * ((u,v) - 112)
+  // (k = source pixels per crop pixel). warpAffine with WARP_INVERSE_MAP takes
+  // exactly this dst->src matrix and does rotate + scale + crop in one
   // resampling step
-  const float k = roi.size / kHandIn, c = std::cos(roi.angle),
-              s = std::sin(roi.angle), h = kHandIn * 0.5f;
+  const float k = roi.size / kHandIn;
+  const float c = std::cos(roi.angle);
+  const float s = std::sin(roi.angle);
+  const float h = kHandIn * 0.5f;
   const cv::Matx23f A(c * k, -s * k, roi.c.x - c * k * h + s * k * h, s * k,
                       c * k, roi.c.y - s * k * h - c * k * h);
   cv::warpAffine(bgr, crop_, A, cv::Size(kHandIn, kHandIn),
@@ -356,15 +367,35 @@ bool LandmarkHandTracker::runLandmarks(
   const int sz[4] = {1, kHandIn, kHandIn, 3};
   handNet_.setInput(cv::Mat(4, sz, CV_32F, cropF_.data));
   handNet_.forward(handOuts_, handOutNames_);
+
+  if (std::getenv("HAND_DEBUG")) {
+    std::fprintf(stderr, "[lm] outs=%zu", handOuts_.size());
+    for (size_t i = 0; i < handOuts_.size(); ++i) {
+      std::fprintf(
+          stderr, " [%zu:total=%d first=%.4f]", i, (int)handOuts_[i].total(),
+          handOuts_[i].total() > 0 ? handOuts_[i].ptr<float>()[0] : 0.f);
+    }
+    std::fprintf(stderr, "\n");
+  }
+
+  if (std::getenv("HAND_DEBUG")) {
+    std::fprintf(stderr, "[lm] names:");
+    for (auto &n : handOutNames_) {
+      std::fprintf(stderr, " '%s'", n.c_str());
+    }
+    std::fprintf(stderr, "\n");
+  }
+
   landmarkMs_ += nowMs() - t0;
 
   // Outputs: [0] 63 floats = 21 x (x, y, z) in crop pixels, [1] hand-presence
-  // probability, [2] handedness, [3] metric 3-D landmarks (unused).
+  // probability, [2] handedness, [3] metric 3-D landmarks (unused)
   if (handOuts_.size() < 2 || handOuts_[0].total() < 63 ||
-      handOuts_[1].total() < 1)
+      handOuts_[1].total() < 1) {
     return false;
+  }
   const float *lm = handOuts_[0].ptr<float>();
-  score = handOuts_[1].ptr<float>()[0];
+  score = handOuts_[2].ptr<float>()[0];
   for (int i = 0; i < kNumLandmarks; ++i) {
     const float x = lm[3 * i], y = lm[3 * i + 1];
     px[i] = {A(0, 0) * x + A(0, 1) * y + A(0, 2),

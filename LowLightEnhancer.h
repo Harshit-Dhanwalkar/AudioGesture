@@ -1,16 +1,14 @@
 #pragma once
 // Brightens dark webcam frames for hand tracker (and for preview, to see what
-// tracker sees).  Two cheap steps, applied only when scene is dark:
+// tracker sees). Two cheap steps, applied only when scene is dark:
 //
-//  1. Gamma lift.  Output = 255 * (in/255)^g with g < 1 lifts shadows much more
-//  than highlights.  g is chosen so frame's mean luma lands near `target`:
-//  (mean/255)^g = target   =>   g = ln(target) / ln(mean/255)
-//  and is clamped to [0.4, 1] so a nearly black frame doesn't turn into pure
-//  noise
-//  2. CLAHE on the L channel of Lab.  Contrast-limited adaptive histogram
+//  1. Gamma lift. Output = 255 * (in/255)^g with g < 1 lifts shadows much more
+//  than highlights. g is chosen so frame's mean luma lands near `target`:
+//  (mean/255)^g = target  =>   g = ln(target) / ln(mean/255) and is clamped to
+//  [0.4, 1] so a nearly black frame doesn't turn into pure noise
+//  2. CLAHE on L channel of Lab.  Contrast-limited adaptive histogram
 //  equalisation works on small tiles, so a hand lit by a monitor gets local
-//  contrast even when the rest of the room is black; the clip limit stops it
-//  blowing up sensor noise
+//  contrast even when rest of room is black; clip limit stops it blowing up sensor noise
 
 #include <algorithm>
 #include <cmath>
@@ -21,9 +19,9 @@ class LowLightEnhancer {
 public:
   enum class Mode { Auto, On, Off };
 
-  // Tunables (the stages can be switched off individually; tools/hand_probe.cpp
+  // Tunables (stages can be switched off individually; tools/hand_probe.cpp
   // sweeps them). CLAHE is off by default: in testing it amplified noise enough
-  // to make the detectors fail more often
+  // to make detectors fail more often
   bool useGamma = true, useClahe = false;
   float maxBlurSigma =
       2.2f; // px; blur applied at pure black, fading to 0 at switch-off level
@@ -72,7 +70,7 @@ public:
       return bgr;
     }
 
-    // 1) gamma lift towards a mean luma of `kTarget`
+    // 1. \gamma lift towards a mean luma of `kTarget`
     if (useGamma) {
       const float norm = std::max(meanLuma_, 4.f) / 255.f;
       const float g =
@@ -90,7 +88,7 @@ public:
       bgr.copyTo(lifted_);
     }
 
-    // 1b) Lift amplifies sensor noise by same factor as signal and CNNs read
+    // 1b. Lift amplifies sensor noise by same factor as signal and CNNs read
     //  that grain as texture. Hands are big smooth shapes, so average it away;
     //  darker scene, stronger blur (sigma ~2.2 px at black, ~0 near switch-off
     //  level)
@@ -100,7 +98,7 @@ public:
       cv::GaussianBlur(lifted_, lifted_, cv::Size(0, 0), sigma);
     }
 
-    // 2) local contrast on lightness only (keeps colours stable)
+    // 2. local contrast on lightness only (keeps colours stable)
     if (!useClahe) {
       out_ = lifted_;
       return out_;
@@ -124,7 +122,7 @@ private:
   static constexpr float kOffAbove =
       105.f; // switch off above this (hysteresis)
   static constexpr float kTarget =
-      0.42f; // desired mean luma after the gamma lift (0..1)
+      0.42f; // desired mean luma after \gamma lift (0..1)
 
   Mode mode_ = Mode::Auto;
   bool active_ = false, first_ = true;
