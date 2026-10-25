@@ -10,6 +10,8 @@
 
 #include <array>
 #include <atomic>
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 #include <portaudio.h>
@@ -36,6 +38,14 @@ public:
 
     double playheadNorm() const { return headNorm_.load(std::memory_order_relaxed); }
     const std::vector<float>& samples() const { return mono_; }
+
+    // --- visualizer tap -------------------------------------------------------------------
+    // The audio callback copies every output sample into a lock-free ring; the UI thread calls
+    // copyRecent() to read the newest n samples (mono, oldest first, n <= 16384).  Single writer,
+    // relaxed atomics per sample: a read can at worst see a glitch at the very oldest sample,
+    // never a torn value, and the audio thread never waits on the UI.
+    void   copyRecent(float* dst, size_t n) const;
+    double outputSampleRate() const { return devSR_; }
 
 private:
     static int paCallback(const void*, void* out, unsigned long frames,
@@ -64,6 +74,11 @@ private:
     // Targets written by the UI thread.
     std::atomic<float> tStretch_{1.f}, tGrain_{120.f}, tPitch_{0.f}, tDir_{1.f}, tGain_{0.8f};
     std::atomic<double> headNorm_{0.0};
+
+    // Output ring for the visualizer (see copyRecent).
+    static constexpr size_t kRing = 1 << 15;   // 32768 samples, power of two
+    std::unique_ptr<std::atomic<float>[]> ring_;
+    std::atomic<uint64_t> ringPos_{0};
 
     // Audio-thread-only state.
     float  stretch_ = 1.f, grainMs_ = 120.f, pitch_ = 0.f, dir_ = 1.f, gain_ = 0.8f;

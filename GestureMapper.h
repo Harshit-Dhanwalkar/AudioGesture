@@ -60,7 +60,7 @@ public:
         audio.setParams(p_);
     }
 
-    void draw(cv::Mat& img, const HandState& hs, double playhead) const {
+    void draw(cv::Mat& img, const HandState& hs) const {
         auto pt = [&](float x, float y) { return cv::Point(int(x * img.cols), int(y * img.rows)); };
         if (hs.left.valid)  cv::circle(img, pt(lx_, ly_), 12, {255, 128, 0}, 2);
         if (hs.right.valid) cv::circle(img, pt(rx_, ry_), 12, {0, 128, 255}, 2);
@@ -68,9 +68,9 @@ public:
         char buf[160];
         std::snprintf(buf, sizeof buf, "stretch %.2fx  grain %.0fms  pitch %+.1fst  dir %+.0f",
                       p_.stretch, p_.grainMs, p_.pitchSemis, p_.direction);
+        cv::putText(img, buf, {10, 24}, cv::FONT_HERSHEY_SIMPLEX, 0.55, {0, 0, 0}, 3, cv::LINE_AA);   // outline: readable on any background
         cv::putText(img, buf, {10, 24}, cv::FONT_HERSHEY_SIMPLEX, 0.55, {255, 255, 255}, 1, cv::LINE_AA);
-        cv::rectangle(img, {10, img.rows - 20}, {img.cols - 10, img.rows - 10}, {80, 80, 80}, 1);
-        cv::rectangle(img, {10, img.rows - 20}, {10 + int((img.cols - 20) * playhead), img.rows - 10}, {0, 255, 0}, cv::FILLED);
+        // (the playhead now lives in the waveform strip drawn by Visualizer)
     }
 
 private:
