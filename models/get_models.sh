@@ -38,11 +38,36 @@ fetch palm_detection_mediapipe      "$PALM" "$PALM_SHA"
 fetch handpose_estimation_mediapipe "$HAND" "$HAND_SHA"
 
 COMPAT=${HAND%.onnx}_cvcompat.onnx
-if python3 -c 'import onnx' 2>/dev/null; then
-    python3 make_opencv_compat.py "$HAND" "$COMPAT"
-else
-    echo "note: python package 'onnx' not found, so $COMPAT was not generated." >&2
-    echo "      Only needed if your OpenCV is older than 4.7 ('pkg-config --modversion opencv4')." >&2
-    echo "      Fix:  pip install onnx   (or: sudo apt install python3-onnx)  and re-run this script." >&2
+# Single source of truth for the interpreter. Override with:
+#   PYTHON=.venv/bin/python bash models/get_models.sh
+PYTHON="${PYTHON:-python3}"
+if ! PYTHON=$(command -v "$PYTHON" 2>/dev/null); then
+    echo "ERROR: interpreter '$PYTHON' not found; set PYTHON=/path/to/python and re-run" >&2
+    exit 1
 fi
-echo "done."
+
+"$PYTHON" -c 'import sys; print("using:", sys.executable)'
+
+if ONNX_ERR=$("$PYTHON" -c 'import onnx' 2>&1); then
+    # onnx available
+    [ -f make_opencv_compat.py ] || { echo "ERROR: make_opencv_compat.py missing next to get_models.sh" >&2; exit 1; }
+    [ -f "$HAND" ]              || { echo "ERROR: $HAND missing; cannot build $COMPAT" >&2; exit 1; }
+    "$PYTHON" make_opencv_compat.py "$HAND" "$COMPAT"
+    [ -s "$COMPAT" ] || { echo "ERROR: $COMPAT was not produced" >&2; exit 1; }
+    echo "ok      $COMPAT"
+else
+    # onnx missing
+    PYINFO=$("$PYTHON" -c 'import sys; print(sys.version.split()[0], sys.executable)' 2>/dev/null || echo "unknown")
+    {
+        echo "note: '$PYTHON' cannot import onnx ($PYINFO)."
+        [ -n "$ONNX_ERR" ] && printf '%s\n' "$ONNX_ERR" | sed 's/^/      /'
+        echo "      Its pip:  $("$PYTHON" -m pip -V 2>&1 || echo 'n/a')"
+        echo "      Fix:      \"$PYTHON\" -m pip install onnx   then re-run"
+    } >&2
+
+    if [ "$NEED_COMPAT" -eq 1 ]; then
+        echo "ERROR: OpenCV $OPENCV_VER (< 4.7) needs $COMPAT, but onnx is missing." >&2
+        exit 1
+    fi
+    echo "      Skipping $COMPAT (OpenCV ${OPENCV_VER:-?} >= 4.7)." >&2
+fi
