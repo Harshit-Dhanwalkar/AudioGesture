@@ -22,8 +22,9 @@ constexpr float kPi = 3.14159265358979f;
 
 const std::vector<std::string> kLandmarkOuts = {
     "Identity",   // [0] 21x(xyz) landmarks, crop pixels
-    "Identity_1", // [1] handedness (sigmoid, ~0 or ~1)
-    "Identity_2", // [2] presence (0..1)   <- the score we want
+    "Identity_1", // [1] presence (0..1)   <- score we want (checked against
+                  //     ONNX Runtime: ~0.98 on a hand crop, ~0.01 on black)
+    "Identity_2", // [2] handedness (unused)
     "Identity_3", // [3] 21x(xyz) world landmarks, metres
 };
 
@@ -61,14 +62,14 @@ std::vector<cv::Point2f> makeAnchors() {
   return a;
 }
 
-// OpenCV older than 4.7 can't parse the stock landmark model (see
-// models/make_opencv_compat.py), so on those versions we try the "_cvcompat"
-// file first
+// OpenCV older than 4.7 can't parse stock landmark model (see
+// models/make_opencv_compat.py), so on those versions we try "_cvcompat" file
+// first
 cv::dnn::Net loadNet(const std::vector<std::string> &candidates,
                      std::string &used, std::string &err) {
   using namespace cv::utils::logging;
   const LogLevel prev = getLogLevel();
-  setLogLevel(LOG_LEVEL_SILENT); // the importer is very noisy on failure
+  setLogLevel(LOG_LEVEL_SILENT);
   cv::dnn::Net net;
   for (const std::string &p : candidates) {
     if (!fileExists(p)) {
@@ -139,8 +140,9 @@ std::string findModelsDir(const std::string &hint) {
   }
 
   for (const auto &c : cands) {
-    if (fileExists(c + "/" + kPalmModelFile))
+    if (fileExists(c + "/" + kPalmModelFile)) {
       return c;
+    }
   }
 
   return hint.empty() ? "models" : hint;
@@ -324,11 +326,14 @@ LandmarkHandTracker::detectPalms(const cv::Mat &bgr) {
 //  * make it square on longer side and enlarge x2.6 so all fingers fit
 LandmarkHandTracker::Roi LandmarkHandTracker::roiFromPalm(const Palm &p) {
   Roi r;
-  r.angle = handAngle(p.kp[0], p.kp[2]);
+  const float a = handAngle(p.kp[0], p.kp[2]);
+  r.angle = std::clamp(a, -0.6f, 0.6f);
+
   const cv::Point2f centre(p.box.x + p.box.width / 2,
                            p.box.y + p.box.height / 2);
   r.c = centre + upVec(r.angle) * (0.5f * p.box.height);
-  r.size = std::max(p.box.width, p.box.height) * 2.6f;
+  r.size = std::max(p.box.width, p.box.height) * 2.4f;
+
   return r;
 }
 
@@ -403,7 +408,7 @@ bool LandmarkHandTracker::runLandmarks(
   // memory. Forward by name so handOuts_[i] maps to a known tensor on any
   // OpenCV version (getUnconnectedOutLayersNames order is graph-traversal
   // dependent - on 4.5.4 it lands at {Identity, Identity_3, Identity_2,
-  // Identity_1}).
+  // Identity_1})
   const int sz[4] = {1, kHandIn, kHandIn, 3};
   handNet_.setInput(cv::Mat(4, sz, CV_32F, cropF_.data));
   if (useNamedOuts_) {
@@ -426,15 +431,11 @@ bool LandmarkHandTracker::runLandmarks(
 
   // Outputs when forwarded by name (kLandmarkOuts order):
   //   [0] Identity    = 21x(xyz) landmarks in crop pixels
-  //   [1] Identity_1  = handedness (sigmoid, saturates near 0 or 1)
-  //   [2] Identity_2  = presence score (0..1)  <- value we track on
+  //   [1] Identity_1  = presence score (0..1)  <- value we track on
+  //   [2] Identity_2  = handedness (unused; hovers ~0.5, NOT a presence)
   //   [3] Identity_3  = 21x(xyz) world landmarks (unused)
-  // Fallback order on OpenCV 4.5.4 (getUnconnectedOutLayersNames):
-  //   [0]=lm, [1]=world, [2]=presence, [3]=handed
-  // Index 2 is presence in both - coincidence, but name-based path pins it on
-  // any future OpenCV that reorders
   const int lmIdx = 0;
-  const int scoreIdx = 2;
+  const int scoreIdx = 1;
 
   if (handOuts_.size() <= size_t(scoreIdx) || handOuts_[lmIdx].total() < 63 ||
       handOuts_[scoreIdx].total() != 1) {
@@ -594,24 +595,26 @@ void LandmarkHandTracker::process(const cv::Mat &bgr, double dt,
   }
 
   // Left/right slots
-  // A lone hand is "right" (drives pitch/direction). When a second hand
-  //    shows up, one further left on screen becomes "left"; after that each
-  //    hand keeps its slot even if they cross
+  // A lone hand is "right" (drives pitch/direction). When a second hand shows
+  // up, one further left on screen becomes "left"; after that each hand keeps
+  // its slot even if they cross
   const bool anyFresh = tracks_[0].fresh || tracks_[1].fresh;
   if (nActive == 2 && anyFresh) {
     const bool zeroIsLeft =
-        palmCentre(tracks_[0].raw).x <= palmCentre(tracks_[1].raw).x;
+        palmCentre(tracks_[0].raw).x >= palmCentre(tracks_[1].raw).x;
     tracks_[0].slot = zeroIsLeft ? 0 : 1;
     tracks_[1].slot = zeroIsLeft ? 1 : 0;
   } else if (nActive == 1) {
     for (Track &t : tracks_) {
-      if (t.active && t.fresh) {
-        t.slot = 1;
+      if (t.active) {
+        // Image is mirrored: screen-left is user's right hand (slot 1)
+        // screen-right is user's left hand (slot 0)
+        t.slot = (palmCentre(t.raw).x < W * 0.5f) ? 1 : 0;
       }
     }
   }
 
-  // 5) Smooth and publish.
+  // Smooth and publish
   for (Track &t : tracks_) {
     t.fresh = false;
     if (!t.active) {
@@ -670,7 +673,7 @@ bool CameraHandSource::poll(HandState &out) {
     cv::flip(raw_, mirrored_, 1); // mirror webcams so it feels like a mirror
   }
 
-  const cv::Mat &proc = enh_.apply(mirrored_); // brightened if the room is dark
+  const cv::Mat &proc = enh_.apply(mirrored_); // brightened if room is dark
 
   const double t = nowMs() / 1000.0;
   const double dt = (lastT_ > 0) ? t - lastT_ : 1.0 / 30.0;
@@ -727,8 +730,8 @@ void drawHands(cv::Mat &img, const HandState &hs, bool debugRoi) {
     }
 
     for (const auto &b : bones) {
-      // A bone takes its finger's colour when both ends are on the same finger
-      // (or it is the wrist->thumb bone); palm outline bones are white.
+      // A bone takes its finger's colour when both ends are on same finger
+      // (or it is wrist->thumb bone); palm outline bones are white
       const int fa = finger(b[0]), fb = finger(b[1]);
       const bool onFinger = (fa == fb && fa >= 0) || (b[0] == 0 && b[1] == 1);
       const cv::Scalar col = onFinger ? fingerColour[fb] : palmColour;

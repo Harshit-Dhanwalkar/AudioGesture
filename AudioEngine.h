@@ -1,89 +1,115 @@
 #pragma once
-// Real-time granular audio engine.
+// Real-time granular audio engine
 //
-// Why granular? Plain "resample playback" ties speed and pitch together.
+// Granular: Plain "resample playback" ties speed and pitch together
 // With grains we get two independent controls:
-//   * head speed  (how fast the read position travels through the file)  -> time stretch / reverse / scrub
-//   * grain pitch (how fast each short grain reads its samples)          -> pitch shift
+//   * head speed  (how fast read position travels through file)  -> time
+//   stretch / reverse / scrub
+//   * grain pitch (how fast each short grain reads its samples)  -> pitch shift
 // Each grain is a short Hann-windowed snippet, so there are no clicks at
-// buffer boundaries or when parameters change.
+// buffer boundaries or when parameters change
 
 #include <array>
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <portaudio.h>
 #include <string>
 #include <vector>
-#include <portaudio.h>
 
 struct EngineParams {
-    float stretch    = 1.0f;   // time-stretch factor: 2 = twice as long (half speed), 0.5 = double speed
-    float grainMs    = 120.0f; // grain length in milliseconds
-    float pitchSemis = 0.0f;   // pitch shift in semitones
-    float direction  = 1.0f;   // +1 forward, -1 reverse, values between = scrub through zero
-    float gain       = 0.8f;
+  float stretch = 1.0f; // time-stretch factor: 2 = twice as long (half speed),
+                        // 0.5 = double speed
+  float grainMs = 120.0f;  // grain length in milliseconds
+  float pitchSemis = 0.0f; // pitch shift in semitones
+  float direction =
+      1.0f; // +1 forward, -1 reverse, values between = scrub through zero
+  float gain = 0.8f;
+  float invert = 1.0f; // +1 normal, -1 phase-flipped (master)
+
+  // "Rubber waveform" amplitude envelope. File is cut into segments of segSec
+  // seconds; inside a segment gain slides linearly from envL (at its start,
+  // under left hand) to envR (at its end, right hand)
+  // Signed: +1 full, 0 silent, -1 full but phase-flipped (hand upside down)
+  float envL = 1.0f, envR = 1.0f;
+  float segSec = 4.0f;
 };
 
 class AudioEngine {
 public:
-    AudioEngine();
-    ~AudioEngine();
+  AudioEngine();
+  ~AudioEngine();
 
-    bool load(const std::string& path);   // WAV/FLAC/OGG (and MP3 with libsndfile >= 1.1)
-    bool start();
-    void stop();
+  bool load(
+      const std::string &path); // WAV/FLAC/OGG (and MP3 with libsndfile >= 1.1)
+  bool start();
+  void stop();
 
-    // Thread-safe setters: write "targets"; the audio thread smooths toward them.
-    void setParams(const EngineParams& p);
+  // Thread-safe setters: write "targets"; audio thread smooths toward them
+  void setParams(const EngineParams &p);
 
-    double playheadNorm() const { return headNorm_.load(std::memory_order_relaxed); }
-    const std::vector<float>& samples() const { return mono_; }
+  double playheadNorm() const {
+    return headNorm_.load(std::memory_order_relaxed);
+  }
+  const std::vector<float> &samples() const { return mono_; }
 
-    // --- visualizer tap -------------------------------------------------------------------
-    // The audio callback copies every output sample into a lock-free ring; the UI thread calls
-    // copyRecent() to read the newest n samples (mono, oldest first, n <= 16384).  Single writer,
-    // relaxed atomics per sample: a read can at worst see a glitch at the very oldest sample,
-    // never a torn value, and the audio thread never waits on the UI.
-    void   copyRecent(float* dst, size_t n) const;
-    double outputSampleRate() const { return devSR_; }
+  // Visualizer tap
+  // Audio callback copies every output sample into a lock-free ring; UI thread
+  // calls copyRecent() to read newest n samples (mono, oldest first, n <=
+  // 16384).  Single writer, relaxed atomics per sample: a read can at worst see
+  // a glitch at very oldest sample, never a torn value and audio thread never
+  // waits on UI
+  void copyRecent(float *dst, size_t n) const;
+  double outputSampleRate() const { return devSR_; }
+  double fileSampleRate() const { return fileSR_; }
 
 private:
-    static int paCallback(const void*, void* out, unsigned long frames,
-                          const PaStreamCallbackTimeInfo*, PaStreamCallbackFlags, void* user);
-    void render(float* out, unsigned long frames);
-    void spawnGrain();
+  static int paCallback(const void *, void *out, unsigned long frames,
+                        const PaStreamCallbackTimeInfo *, PaStreamCallbackFlags,
+                        void *user);
+  void render(float *out, unsigned long frames);
+  void spawnGrain();
 
-    struct Grain {
-        bool   active = false;
-        double pos    = 0.0;   // read position in source samples (fractional)
-        double sign   = 1.0;   // +1 forward, -1 reverse (fixed at spawn)
-        int    age    = 0;
-        int    len    = 1;
-    };
-    static constexpr int kMaxGrains = 16;
+  struct Grain {
+    bool active = false;
+    double pos = 0.0;  // read position in source samples (fractional)
+    double sign = 1.0; // +1 forward, -1 reverse (fixed at spawn)
+    int age = 0;
+    int len = 1;
+  };
+  static constexpr int kMaxGrains = 16;
 
-    // Source audio (mono, float).
-    std::vector<float> mono_;
-    double fileSR_ = 44100.0;
+  // Source audio (mono, float)
+  std::vector<float> mono_;
+  double fileSR_ = 44100.0;
 
-    // PortAudio.
-    PaStream* stream_ = nullptr;
-    double devSR_ = 44100.0;
-    bool paInit_ = false;
+  // PortAudio
+  PaStream *stream_ = nullptr;
+  double devSR_ = 44100.0;
+  bool paInit_ = false;
 
-    // Targets written by the UI thread.
-    std::atomic<float> tStretch_{1.f}, tGrain_{120.f}, tPitch_{0.f}, tDir_{1.f}, tGain_{0.8f};
-    std::atomic<double> headNorm_{0.0};
+  // Targets written by UI thread
+  std::atomic<float> tStretch_{1.f}, tGrain_{120.f}, tPitch_{0.f}, tDir_{1.f},
+      tGain_{0.8f}, tInvert_{1.f}, tEnvL_{1.f}, tEnvR_{1.f}, tSeg_{4.f};
+  std::atomic<double> headNorm_{0.0};
 
-    // Output ring for the visualizer (see copyRecent).
-    static constexpr size_t kRing = 1 << 15;   // 32768 samples, power of two
-    std::unique_ptr<std::atomic<float>[]> ring_;
-    std::atomic<uint64_t> ringPos_{0};
+  // Output ring for visualizer (see copyRecent)
+  static constexpr size_t kRing = 1 << 15; // 32768 samples, power of two
+  std::unique_ptr<std::atomic<float>[]> ring_;
+  std::atomic<uint64_t> ringPos_{0};
 
-    // Audio-thread-only state.
-    float  stretch_ = 1.f, grainMs_ = 120.f, pitch_ = 0.f, dir_ = 1.f, gain_ = 0.8f;
-    double head_ = 0.0;
-    int    countdown_ = 0;
-    double aSlow_ = 0.0, aFast_ = 0.0; // one-pole smoothing coefficients
-    std::array<Grain, kMaxGrains> grains_;
+  // Audio-thread-only state
+  float stretch_ = 1.f;
+  float grainMs_ = 120.f;
+  float pitch_ = 0.f;
+  float dir_ = 1.f;
+  float gain_ = 0.8f;
+  float invert_ = 1.f;
+  float envL_ = 1.f;
+  float envR_ = 1.f;
+  double head_ = 0.0;
+  int countdown_ = 0;
+  double aSlow_ = 0.0;
+  float aFast_ = 0.0; // one-pole smoothing coefficients
+  std::array<Grain, kMaxGrains> grains_;
 };

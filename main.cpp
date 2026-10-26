@@ -4,9 +4,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <memory>
-#include <string>
 #include <iostream>
+#include <memory>
 #include <string>
 
 #include "AudioEngine.h"
@@ -31,7 +30,8 @@ void usage(const char *exe) {
                "usage: %s <audio.wav|flac|ogg|mp3> [camera_index | video_file] "
                "[--models DIR] [--skin]\n"
                "  keys: l low-light boost (auto/on/off)   v visualizer style   "
-               "d show tracking ROI   q/Esc quit\n",
+               "d show tracking ROI   c calibrate pose   p pitch on/off   "
+               "s segment length   q/Esc quit\n",
                exe);
 }
 
@@ -140,7 +140,8 @@ int main(int argc, char **argv) {
   double fps = 0;
   auto last = std::chrono::steady_clock::now();
 
-  constexpr int kSpecH = 150, kWaveH = 44;
+  constexpr int kSpecH = 150;
+  constexpr int kWaveH = 44;
 
   while (src->poll(hands)) {
     const auto now = std::chrono::steady_clock::now();
@@ -155,7 +156,7 @@ int main(int argc, char **argv) {
     cv::Mat view = src->frame().clone();
     if (dnn)
       drawHands(view, hands, debugRoi);
-    mapper.draw(view, hands);
+    mapper.draw(view, hands, audio);
     char status[160];
     if (dnn) {
       const LowLightEnhancer &e = dnn->enhancer();
@@ -199,6 +200,15 @@ int main(int argc, char **argv) {
     }
     if (k == 'd') {
       debugRoi = !debugRoi;
+    }
+    if (k == 'c') {
+      mapper.calibrate(hands); // current pose = 1x speed, full amplitude
+    }
+    if (k == 'p') {
+      mapper.togglePitch();
+    }
+    if (k == 's') {
+      mapper.cycleSegment();
     }
     if (k == 'l' && dnn) {
       dnn->enhancer().cycleMode();

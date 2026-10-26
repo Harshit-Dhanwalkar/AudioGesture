@@ -2,9 +2,10 @@
 // Landmark-based hand tracker: MediaPipe two-stage pipeline running on
 // cv::dnn
 //
-//   Stage 1  palm detector  (192x192 SSD, 2016 anchors)  finds palms anywhere
-//   in frame. Stage 2  hand landmarks (224x224 CNN) regresses 21 3-D joints
-//   inside a rotated square crop around one hand
+//   Stage 1 palm detector (192x192 SSD, 2016 anchors) finds palms anywhere
+//   in frame
+//   Stage 2  hand landmarks (224x224 CNN) regresses 21 3-D joints inside a
+//   rotated square crop around one hand
 //
 // Stage 2 also reports "is a hand really in this crop?".  We exploit that to
 // track: joints from frame N define crop for frame N+1, so (slower) palm
@@ -36,17 +37,15 @@ std::string findModelsDir(const std::string &hint);
 struct HandTrackerConfig {
   std::string palmModel; // full paths
   std::string landmarkModel;
-  int maxHands = 2;       // 1 or 2
-  float palmScore = 0.4f; // palm detector confidence needed to consider a
-                          // candidate Deliberately low (MediaPipe uses 0.5):
-                          // landmark model's "hand present" score below is real
-                          // verifier, and dim, noisy frames need slack
-  float palmNms = 0.3f;   // non-max-suppression IoU
-  float presenceStart =
-      0.4f; // landmark confidence needed to START tracking a hand
-  float presenceKeep =
-      0.3f; // ...and to KEEP it (lower => hysteresis, fewer drop-outs)
-  int redetectEvery = 4; // while a slot is free but a hand is tracked, look for
+  int maxHands = 2;        // 1 or 2
+  float palmScore = 0.25f; // palm detector confidence needed to consider a
+                           // candidate Deliberately low (MediaPipe uses 0.5):
+                           // landmark model's "hand present" score below is
+                           // real verifier, and dim, noisy frames need slack
+  float palmNms = 0.3f;       // non-max-suppression IoU
+  float presenceStart = 0.5f; // landmark confidence to start tracking
+  float presenceKeep = 0.4f;  // lower => hysteresis, fewer drop-outs
+  int redetectEvery = 2; // while a slot is free but a hand is tracked, look for
                          // other hand every N frames
   float filterMinCutoff = 1.5f; // One-Euro smoothing of landmark pixels (Hz)
   float filterBeta = 0.02f;
