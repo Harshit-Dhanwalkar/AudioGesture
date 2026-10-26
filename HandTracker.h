@@ -37,15 +37,15 @@ struct HandTrackerConfig {
   std::string palmModel; // full paths
   std::string landmarkModel;
   int maxHands = 2;       // 1 or 2
-  float palmScore = 0.3f; // palm detector confidence needed to consider a
+  float palmScore = 0.4f; // palm detector confidence needed to consider a
                           // candidate Deliberately low (MediaPipe uses 0.5):
                           // landmark model's "hand present" score below is real
                           // verifier, and dim, noisy frames need slack
   float palmNms = 0.3f;   // non-max-suppression IoU
   float presenceStart =
-      0.5f; // landmark confidence needed to START tracking a hand
+      0.4f; // landmark confidence needed to START tracking a hand
   float presenceKeep =
-      0.4f; // ...and to KEEP it (lower => hysteresis, fewer drop-outs)
+      0.3f; // ...and to KEEP it (lower => hysteresis, fewer drop-outs)
   int redetectEvery = 4; // while a slot is free but a hand is tracked, look for
                          // other hand every N frames
   float filterMinCutoff = 1.5f; // One-Euro smoothing of landmark pixels (Hz)
@@ -109,6 +109,7 @@ private:
   HandTrackerConfig cfg_;
   bool ok_ = false;
   std::string error_, handModelUsed_;
+  bool useNamedOuts_ = true;
 
   cv::dnn::Net palmNet_, handNet_;
   std::vector<std::string> palmOutNames_, handOutNames_;

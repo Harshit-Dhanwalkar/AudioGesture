@@ -1,4 +1,4 @@
-# gesture_grain
+# Audio Gesture
 
 Control audio with two hands and a webcam: granular time-stretch, pitch, reverse/scrub -
 with a real 21-joint hand skeleton tracker that keeps working in dim light, and a cava-style
@@ -17,12 +17,12 @@ pip install onnx        # only needed once, for `make models`, if OpenCV <=  4.7
 # export PATH="/usr/bin:$PATH:/home/linuxbrew/.linuxbrew/bin"
 make models                       # one-off: downloads ~8 MB of hand-tracking models into models/
 make                              # configure + build
-make run AUDIO=sample.wav         # or:  ./build/gesture_grain sample.wav [camera_index | video_file]
+make run AUDIO=sample.wav         # or:  ./build/audiogesture sample.wav [camera_index | video_file]
 ```
 
 Debug mode:
 ```sh
-HAND_DEBUG=1 ./build/gesture_grain audio/file_example_WAV_2MG.wav 2>&1 | grep -E '\[palm\]|\[lm\]'
+HAND_DEBUG=1 ./build/audiogesture audio/file_example_WAV_2MG.wav 2>&1 | grep -E '\[palm\]|\[lm\]'
 ```
 
 If `models/` is empty the app says so and falls back to the old skin-colour tracker (`--skin` forces it).
@@ -86,7 +86,7 @@ make probe
 build/hand_probe photo.jpg --out result.png                       # skeleton on a still image
 build/hand_probe photo.jpg --dark 0.15 --noise 4 --lowlight --out dark.png   # simulate a dim room
 build/hand_probe clip.mp4 --frames 120 --debug --out last.png     # a video file; prints per-frame timings
-./build/gesture_grain sample.wav clip.mp4                         # whole app on a recorded clip (loops)
+./build/audiogesture sample.wav clip.mp4                          # whole app on a recorded clip (loops)
 ```
 
 ## OpenCV versions

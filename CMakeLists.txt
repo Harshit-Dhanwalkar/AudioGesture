@@ -13,17 +13,17 @@ pkg_check_modules(PORTAUDIO REQUIRED IMPORTED_TARGET portaudio-2.0)
 pkg_check_modules(SNDFILE   REQUIRED IMPORTED_TARGET sndfile)
 
 # The app
-add_executable(gesture_grain
+add_executable(audiogesture
   main.cpp
   AudioEngine.cpp
   GestureTracker.cpp
   HandTracker.cpp
   Visualizer.cpp)
 
-target_include_directories(gesture_grain PRIVATE ${OpenCV_INCLUDE_DIRS})
-target_link_libraries(gesture_grain PRIVATE
+target_include_directories(audiogesture PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(audiogesture PRIVATE
   ${OpenCV_LIBS} PkgConfig::PORTAUDIO PkgConfig::SNDFILE)
-target_compile_options(gesture_grain PRIVATE -Wall -Wextra -O2)
+target_compile_options(audiogesture PRIVATE -Wall -Wextra -O2)
 
 # Camera-less tracker test: `make probe`, then  build/hand_probe photo.jpg --out result.png
 add_executable(hand_probe EXCLUDE_FROM_ALL tools/hand_probe.cpp HandTracker.cpp)

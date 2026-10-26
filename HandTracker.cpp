@@ -20,6 +20,17 @@ constexpr int kPalmIn = 192; // palm detector input (square)
 constexpr int kHandIn = 224; // landmark model input (square)
 constexpr float kPi = 3.14159265358979f;
 
+const std::vector<std::string> kLandmarkOuts = {
+    "Identity",   // [0] 21x(xyz) landmarks, crop pixels
+    "Identity_1", // [1] handedness (sigmoid, ~0 or ~1)
+    "Identity_2", // [2] presence (0..1)   <- the score we want
+    "Identity_3", // [3] 21x(xyz) world landmarks, metres
+};
+
+// HAND_DEBUG read once at startup
+const bool kDebug = std::getenv("HAND_DEBUG") != nullptr;
+const bool kDebugRoi = std::getenv("HAND_DEBUG_ROI") != nullptr;
+
 double nowMs() {
   return std::chrono::duration<double, std::milli>(
              std::chrono::steady_clock::now().time_since_epoch())
@@ -28,7 +39,7 @@ double nowMs() {
 
 bool fileExists(const std::string &p) { return std::ifstream(p).good(); }
 
-// SSD anchors of MediaPipe palm detector. Fixed-size anchors, so only cell
+// SSD anchors of MediaPipe palm detector.Fixed-size anchors, so only cell
 // centres matter: a 24x24 grid with 2 anchors per cell (stride 8) followed by a
 // 12x12 grid with 6 per cell (stride 16) = 1152 + 864 = 2016. Row-major, centre
 // of cell (x,y) = ((x+.5)/n, (y+.5)/n)
@@ -176,6 +187,23 @@ LandmarkHandTracker::LandmarkHandTracker(const HandTrackerConfig &cfg)
     return;
   }
 
+  // Verify canonical output names are all present so name-pinned forward()
+  // below can't silently fall back to an unexpected order
+  for (const std::string &want : kLandmarkOuts) {
+    if (std::find(handOutNames_.begin(), handOutNames_.end(), want) ==
+        handOutNames_.end()) {
+      error_ = "landmark model is missing output '" + want + "'; got:";
+      for (const auto &n : handOutNames_) {
+        error_ += " '" + n + "'";
+      }
+
+      if (kDebug) {
+        std::fprintf(stderr, "%s\n", error_.c_str());
+      }
+      return;
+    }
+  }
+
   for (auto &t : tracks_) {
     for (auto &f : t.filt) {
       f = OneEuroFilter(cfg_.filterMinCutoff, cfg_.filterBeta);
@@ -190,7 +218,8 @@ LandmarkHandTracker::LandmarkHandTracker(const HandTrackerConfig &cfg)
 std::vector<LandmarkHandTracker::Palm>
 LandmarkHandTracker::detectPalms(const cv::Mat &bgr) {
   const double t0 = nowMs();
-  const int W = bgr.cols, H = bgr.rows;
+  const int W = bgr.cols;
+  const int H = bgr.rows;
 
   // Letterbox into 192x192 (keep aspect ratio, pad with black)
   const float ratio = std::min(float(kPalmIn) / W, float(kPalmIn) / H);
@@ -219,6 +248,7 @@ LandmarkHandTracker::detectPalms(const cv::Mat &bgr) {
       scores = &m;
     }
   }
+
   std::vector<Palm> result;
   if (!boxes || !scores || boxes->size[1] != int(anchors_.size())) {
     palmMs_ = nowMs() - t0;
@@ -274,7 +304,7 @@ LandmarkHandTracker::detectPalms(const cv::Mat &bgr) {
     result.push_back(p);
   }
 
-  if (std::getenv("HAND_DEBUG")) {
+  if (kDebug) {
     std::fprintf(stderr, "[palm] %zu candidates\n", result.size());
     for (size_t i = 0; i < std::min(result.size(), size_t(3)); ++i) {
       std::fprintf(stderr, "[palm] #%zu score=%.3f box=(%.0f,%.0f %.0fx%.0f)\n",
@@ -364,11 +394,25 @@ bool LandmarkHandTracker::runLandmarks(
   cv::cvtColor(crop_, crop_, cv::COLOR_BGR2RGB);
   crop_.convertTo(cropF_, CV_32FC3, 1.0 / 255.0);
 
+  if (kDebugRoi) {
+    std::fprintf(stderr, "[roi] c=(%.1f,%.1f) size=%.1f angle=%.1fdeg\n",
+                 roi.c.x, roi.c.y, roi.size, roi.angle * 180.0f / kPi);
+  }
+
+  // Model wants NHWC: a float HxWx3 image is already laid out that way in
+  // memory. Forward by name so handOuts_[i] maps to a known tensor on any
+  // OpenCV version (getUnconnectedOutLayersNames order is graph-traversal
+  // dependent - on 4.5.4 it lands at {Identity, Identity_3, Identity_2,
+  // Identity_1}).
   const int sz[4] = {1, kHandIn, kHandIn, 3};
   handNet_.setInput(cv::Mat(4, sz, CV_32F, cropF_.data));
-  handNet_.forward(handOuts_, handOutNames_);
+  if (useNamedOuts_) {
+    handNet_.forward(handOuts_, kLandmarkOuts);
+  } else {
+    handNet_.forward(handOuts_, handOutNames_);
+  }
 
-  if (std::getenv("HAND_DEBUG")) {
+  if (kDebug) {
     std::fprintf(stderr, "[lm] outs=%zu", handOuts_.size());
     for (size_t i = 0; i < handOuts_.size(); ++i) {
       std::fprintf(
@@ -378,24 +422,41 @@ bool LandmarkHandTracker::runLandmarks(
     std::fprintf(stderr, "\n");
   }
 
-  if (std::getenv("HAND_DEBUG")) {
-    std::fprintf(stderr, "[lm] names:");
-    for (auto &n : handOutNames_) {
-      std::fprintf(stderr, " '%s'", n.c_str());
-    }
-    std::fprintf(stderr, "\n");
-  }
-
   landmarkMs_ += nowMs() - t0;
 
-  // Outputs: [0] 63 floats = 21 x (x, y, z) in crop pixels, [1] hand-presence
-  // probability, [2] handedness, [3] metric 3-D landmarks (unused)
-  if (handOuts_.size() < 2 || handOuts_[0].total() < 63 ||
-      handOuts_[1].total() < 1) {
+  // Outputs when forwarded by name (kLandmarkOuts order):
+  //   [0] Identity    = 21x(xyz) landmarks in crop pixels
+  //   [1] Identity_1  = handedness (sigmoid, saturates near 0 or 1)
+  //   [2] Identity_2  = presence score (0..1)  <- value we track on
+  //   [3] Identity_3  = 21x(xyz) world landmarks (unused)
+  // Fallback order on OpenCV 4.5.4 (getUnconnectedOutLayersNames):
+  //   [0]=lm, [1]=world, [2]=presence, [3]=handed
+  // Index 2 is presence in both - coincidence, but name-based path pins it on
+  // any future OpenCV that reorders
+  const int lmIdx = 0;
+  const int scoreIdx = 2;
+
+  if (handOuts_.size() <= size_t(scoreIdx) || handOuts_[lmIdx].total() < 63 ||
+      handOuts_[scoreIdx].total() != 1) {
     return false;
   }
-  const float *lm = handOuts_[0].ptr<float>();
-  score = handOuts_[2].ptr<float>()[0];
+
+  // Sanity check: if forward() silently gave world-landmark tensor in slot 0,
+  // landmark magnitudes would be < 1 m instead of > 10 px
+  if (kDebug) {
+    double mx = 0;
+    cv::Mat mag = cv::abs(handOuts_[lmIdx].reshape(1, 1));
+    cv::minMaxLoc(mag, nullptr, &mx);
+    if (mx < 2.0) {
+      std::fprintf(stderr,
+                   "[lm] output 0 max=%g looks like world coords - output "
+                   "order is wrong (useNamedOuts_=%d)\n",
+                   mx, (int)useNamedOuts_);
+    }
+  }
+
+  const float *lm = handOuts_[lmIdx].ptr<float>();
+  score = handOuts_[scoreIdx].ptr<float>()[0];
   for (int i = 0; i < kNumLandmarks; ++i) {
     const float x = lm[3 * i], y = lm[3 * i + 1];
     px[i] = {A(0, 0) * x + A(0, 1) * y + A(0, 2),
