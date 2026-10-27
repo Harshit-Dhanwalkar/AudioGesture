@@ -42,6 +42,7 @@
 build/
 Build/
 build-*/
+build-asan/
 
 # CMake generated files
 CMakeFiles/
@@ -68,3 +69,6 @@ Testing/
 
 # models
 *.onnx
+
+# private test photo for tests/test_tracker.cpp (add your own)
+tests/data/hand.jpg
