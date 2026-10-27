@@ -1,5 +1,5 @@
-#include "HandTracker.h"
-#include "GestureTracker.h"
+#include "audiogesture/vision/HandTracker.h"
+#include "audiogesture/vision/GestureTracker.h"
 
 #include <cstddef>
 #include <unistd.h>
@@ -501,6 +501,55 @@ LandmarkHandTracker::Track *LandmarkHandTracker::freeTrack() {
   return nullptr;
 }
 
+// Fallback acquisition. Wide square crops (no rotation) at fixed places; the
+// landmark model's presence score decides. Cycles one crop per frame so the
+// cost stays at a single landmark pass (~10 ms), at most kScan frames to sweep.
+bool LandmarkHandTracker::scanForHand(const cv::Mat &bgr,
+                                      std::array<cv::Point2f, kNumLandmarks> &px,
+                                      float &score) {
+  const double t0 = nowMs();
+  const float W = float(bgr.cols), H = float(bgr.rows);
+  struct Cand { float cx, cy, side; }; // fractions of W, H and of min(W, H)
+  static const Cand kScan[] = {
+      {0.25f, 0.55f, 1.0f}, {0.75f, 0.55f, 1.0f}, {0.50f, 0.55f, 1.0f},
+      {0.15f, 0.60f, 0.65f}, {0.85f, 0.60f, 0.65f}, {0.50f, 0.50f, 0.65f}};
+  constexpr int kN = int(sizeof kScan / sizeof kScan[0]);
+
+  const Cand &c = kScan[scanIdx_ % kN];
+  scanIdx_ = (scanIdx_ + 1) % kN;
+  Roi roi;
+  roi.c = {c.cx * W, c.cy * H};
+  roi.size = c.side * std::min(W, H);
+  roi.angle = 0.f;
+
+  bool ok = false;
+  float sc = 0.f;
+  if (runLandmarks(bgr, roi, px, sc) && sc >= cfg_.scanPresence) {
+    // Sanity: a real hand has a sensible size and sits (mostly) inside the crop
+    const float span = dist(px[0], px[9]);
+    ok = span > 0.04f * std::min(W, H) && span < 0.9f * roi.size;
+    score = sc;
+  }
+
+  if (kDebug) {
+    std::fprintf(stderr, "[scan] crop %d c=(%.0f,%.0f) size=%.0f presence=%.2f -> %s\n",
+                 (scanIdx_ + kN - 1) % kN, roi.c.x, roi.c.y, roi.size, sc,
+                 ok ? "HAND" : "no");
+  }
+  scanMs_ = nowMs() - t0;
+  return ok;
+}
+
+void LandmarkHandTracker::reset() {
+  for (Track &t : tracks_) {
+    t.active = false;
+    t.fresh = false;
+    t.age = 0;
+  }
+  sinceDetect_ = 0;
+  scanIdx_ = 0;
+}
+
 // Per-frame logic
 
 void LandmarkHandTracker::process(const cv::Mat &bgr, double dt,
@@ -546,6 +595,27 @@ void LandmarkHandTracker::process(const cv::Mat &bgr, double dt,
   }
 
   palmMs_ = 0;
+  scanMs_ = 0;
+  auto startTrack = [&](const std::array<cv::Point2f, kNumLandmarks> &px, float score) {
+    Track *t = freeTrack();
+    if (!t) {
+      return false;
+    }
+
+    t->active = true;
+    t->fresh = true;
+    t->age = 0;
+    t->score = score;
+    t->raw = px;
+    t->roi = roiFromLandmarks(px, W, H);
+    for (auto &f : t->filt) {
+      f.reset();
+    }
+
+    ++nActive;
+    return true;
+  };
+
   if (nActive < cfg_.maxHands &&
       (nActive == 0 || lostOne || ++sinceDetect_ >= cfg_.redetectEvery)) {
     sinceDetect_ = 0;
@@ -565,22 +635,19 @@ void LandmarkHandTracker::process(const cv::Mat &bgr, double dt,
         continue;
       }
 
-      Track *t = freeTrack();
-      if (!t) {
+      if (!startTrack(px, score)) {
         break;
       }
+    }
 
-      t->active = true;
-      t->fresh = true;
-      t->age = 0;
-      t->score = score;
-      t->raw = px;
-      t->roi = roiFromLandmarks(px, W, H);
-      for (auto &f : t->filt) {
-        f.reset();
+    // Palm SSD found nothing usable and no hand is tracked: ask the landmark
+    // model directly about one wide crop (a different one each frame)
+    if (cfg_.scanFallback && nActive == 0) {
+      std::array<cv::Point2f, kNumLandmarks> px;
+      float score = 0.f;
+      if (scanForHand(bgr, px, score)) {
+        startTrack(px, score);
       }
-
-      ++nActive;
     }
   }
 
@@ -600,16 +667,17 @@ void LandmarkHandTracker::process(const cv::Mat &bgr, double dt,
   // its slot even if they cross
   const bool anyFresh = tracks_[0].fresh || tracks_[1].fresh;
   if (nActive == 2 && anyFresh) {
+    // The preview is a mirror, so the hand that is further left on screen is
+    // the user's left hand: slot 0 = left = smaller x
     const bool zeroIsLeft =
-        palmCentre(tracks_[0].raw).x >= palmCentre(tracks_[1].raw).x;
+        palmCentre(tracks_[0].raw).x <= palmCentre(tracks_[1].raw).x;
     tracks_[0].slot = zeroIsLeft ? 0 : 1;
     tracks_[1].slot = zeroIsLeft ? 1 : 0;
   } else if (nActive == 1) {
     for (Track &t : tracks_) {
       if (t.active) {
-        // Image is mirrored: screen-left is user's right hand (slot 1)
-        // screen-right is user's left hand (slot 0)
-        t.slot = (palmCentre(t.raw).x < W * 0.5f) ? 1 : 0;
+        // Mirror view: screen-left half = left hand (slot 0), right half = slot 1
+        t.slot = (palmCentre(t.raw).x < W * 0.5f) ? 0 : 1;
       }
     }
   }

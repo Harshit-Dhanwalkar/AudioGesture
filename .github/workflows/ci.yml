@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEPS: build-essential cmake pkg-config libopencv-dev portaudio19-dev libsndfile1-dev
+
+jobs:
+  # Build with -Werror and run the unit tests on two Ubuntu releases:
+  #   22.04 -> OpenCV 4.5.4 (needs the ONNX compat patch)
+  #   24.04 -> OpenCV 4.6.0
+  build-test:
+    name: build + test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $DEPS
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DAUDIOGESTURE_WERROR=ON
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+      - name: Unit tests
+        # test_tracker reports SKIP here (no models); the models job runs it
+        run: cd build && ctest --output-on-failure -j"$(nproc)"
+
+  # Same tests under AddressSanitizer + UBSan: the audio engine, FFT and the
+  # drawing code index raw buffers.
+  sanitize:
+    name: ASan + UBSan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $DEPS
+      - name: Configure
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DAUDIOGESTURE_WERROR=ON
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+      - name: Unit tests
+        run: cd build && ASAN_OPTIONS=detect_leaks=0 ctest --output-on-failure
+
+  # Downloads the MediaPipe models and runs the tracker test against them on
+  # both OpenCV versions: catches "this OpenCV cannot load the model" and output
+  # order mix-ups (e.g. reading handedness as presence) before users do.
+  models:
+    name: tracker + models (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $DEPS python3-onnx
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: models/*.onnx
+          key: models-${{ matrix.os }}-${{ hashFiles('models/get_models.sh', 'models/make_opencv_compat.py') }}
+      - name: Download models (+ OpenCV<4.7 compat patch)
+        run: bash models/get_models.sh
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DAUDIOGESTURE_WERROR=ON
+          cmake --build build -j"$(nproc)"
+      - name: Tracker tests (needs models)
+        run: cd build && ctest -L models --output-on-failure
+      - name: Probe tool runs
+        run: |
+          cmake --build build --target hand_probe -j"$(nproc)"
+          rc=0; build/hand_probe /nonexistent.jpg || rc=$?
+          test "$rc" -eq 1   # clean "cannot read" error (exit 1), not a crash

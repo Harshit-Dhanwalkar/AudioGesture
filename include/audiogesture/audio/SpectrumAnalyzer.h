@@ -1,20 +1,17 @@
 #pragma once
-// cava-style audio visualizer drawn straight into OpenCV window
+// cava-style spectrum analysis
 //
 //   * spectrum bars : FFT of audio actually leaving speakers (so see effect of
 //   stretch / pitch / reverse), log-spaced bands, auto-gain, gravity fall-off,
 //   "monstercat" neighbour smoothing, peak caps
-//   * waveform strip: overview of whole loaded file with a moving playhead
 //
-// Class is independent of PortAudio/OpenCV windows: feed it samples, give
-// it a canvas
+// Pure DSP: feed it samples, read bars()/peaks(). Drawing lives in
+// ui/SpectrumGrid.h, which maps these bars onto the hand-held grid.
 
 #include <complex>
 #include <vector>
 
-#include <opencv2/core.hpp>
-
-class Visualizer {
+class SpectrumAnalyzer {
 public:
   struct Config {
     int bars = 48;
@@ -32,8 +29,8 @@ public:
                              // height/monstercat^k (<=1 disables)
   };
 
-  Visualizer();
-  explicit Visualizer(const Config &cfg);
+  SpectrumAnalyzer();
+  explicit SpectrumAnalyzer(const Config &cfg);
 
   size_t windowSize() const { return static_cast<size_t>(cfg_.fftSize); }
 
@@ -41,23 +38,15 @@ public:
   // seconds since last call.
   void update(const float *mono, double sampleRate, double dt);
 
-  void cycleStyle() { style_ = (style_ + 1) % 2; } // bars <-> mirrored bars
-  const std::vector<float> &bars() const {
-    return disp_;
-  } // 0..1, after smoothing (for tests / other UIs)
-
-  // Draw two panels into `canvas`. `song` = whole mono file (for  overview),
-  // `playhead` = 0..1 position of read head
-  void drawSpectrum(cv::Mat &canvas, const cv::Rect &r);
-  void drawWaveform(cv::Mat &canvas, const cv::Rect &r,
-                    const std::vector<float> &song, double playhead);
+  // 0..1 per band after smoothing / peak-cap positions, for any UI to draw
+  const std::vector<float> &bars() const { return disp_; }
+  const std::vector<float> &peaks() const { return peak_; }
+  int numBars() const { return cfg_.bars; }
 
 private:
   void buildBands(double sampleRate);
-  void buildGradient(cv::Size size, int style);
 
   Config cfg_;
-  int style_ = 0;
 
   // FFT plan
   std::vector<int> rev_;
@@ -75,12 +64,4 @@ private:
   // dynamics
   std::vector<float> bar_, vel_, disp_, peak_, peakHold_;
   float refDb_ = -40.f; // running loudness reference (auto sensitivity)
-
-  // drawing caches
-  cv::Mat grad_;
-  cv::Size gradSize_;
-  int gradStyle_ = -1;
-  std::vector<float> waveMin_, waveMax_;
-  int waveW_ = 0;
-  size_t waveN_ = 0;
 };

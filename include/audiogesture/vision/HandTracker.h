@@ -22,9 +22,9 @@
 #include <opencv2/dnn.hpp>
 #include <opencv2/opencv.hpp>
 
-#include "GestureTracker.h"
-#include "LowLightEnhancer.h"
-#include "OneEuroFilter.h"
+#include "audiogesture/vision/GestureTracker.h"
+#include "audiogesture/vision/LowLightEnhancer.h"
+#include "audiogesture/vision/OneEuroFilter.h"
 
 inline constexpr const char *kPalmModelFile =
     "palm_detection_mediapipe_2023feb.onnx";
@@ -47,6 +47,12 @@ struct HandTrackerConfig {
   float presenceKeep = 0.4f;  // lower => hysteresis, fewer drop-outs
   int redetectEvery = 2; // while a slot is free but a hand is tracked, look for
                          // other hand every N frames
+  // When the palm detector finds nothing (typical in dark, noisy frames) probe a
+  // few wide crops with the landmark model, which is a better judge of "is
+  // there a hand" than the palm SSD. One crop per frame, cycling, until a hand
+  // is acquired; then normal ROI tracking takes over.
+  bool scanFallback = true;
+  float scanPresence = 0.55f;
   float filterMinCutoff = 1.5f; // One-Euro smoothing of landmark pixels (Hz)
   float filterBeta = 0.02f;
 };
@@ -64,9 +70,13 @@ public:
   // dt = seconds since previous call (drives smoothing filters)
   void process(const cv::Mat &bgr, double dt, HandState &out);
 
+  // Forget all tracks (next frame starts from palm detection / scan)
+  void reset();
+
   // Timings of last call, for HUD
   double palmMs() const { return palmMs_; }
   double landmarkMs() const { return landmarkMs_; }
+  double scanMs() const { return scanMs_; }
 
 private:
   // A square, rotated crop window: centre, side length (px) and rotation
@@ -103,6 +113,8 @@ private:
   static cv::Point2f
   palmCentre(const std::array<cv::Point2f, kNumLandmarks> &px);
   bool overlapsTrack(const Roi &r) const;
+  bool scanForHand(const cv::Mat &bgr, std::array<cv::Point2f, kNumLandmarks> &px,
+                   float &score);
   Track *freeTrack();
 
   HandTrackerConfig cfg_;
@@ -118,7 +130,8 @@ private:
 
   std::array<Track, 2> tracks_;
   int sinceDetect_ = 0;
-  double palmMs_ = 0, landmarkMs_ = 0;
+  int scanIdx_ = 0;
+  double palmMs_ = 0, landmarkMs_ = 0, scanMs_ = 0;
 };
 
 // Webcam (or video file) + low-light enhancement + landmark tracking, as an
@@ -139,6 +152,7 @@ public:
   } // enhanced (if active), mirrored, no overlay
 
   LowLightEnhancer &enhancer() { return enh_; }
+  const LowLightEnhancer &enhancer() const { return enh_; }
   const LandmarkHandTracker &tracker() const { return tracker_; }
   double fps() const { return fps_; }
 
