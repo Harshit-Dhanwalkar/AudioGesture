@@ -16,12 +16,21 @@
 //   --frames N       process N frames (an image is repeated, which exercises
 //   ROI tracking)
 //   --debug          draw the tracking ROI
+//   --jitter PX      shift the image randomly by up to PX pixels per frame
+//                    (a hand that is not perfectly still)
+//   --trials N       cold-start test: N times reset the tracker and enhancer,
+//                    feed up to 15 fresh dark/noisy frames, record how many
+//                    frames it took to find a hand (prints SUMMARY cold ...)
+//   --flip           mirror the image (moves the hand to the other side)
+//   --tmin F         temporal-denoise floor (weight of the newest frame)
+//   --no-scan        disable the scan fallback;  --no-temporal  disable the
+//                    temporal denoise (for A/B comparisons)
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
 
-#include "HandTracker.h"
+#include "audiogesture/vision/HandTracker.h"
 
 int main(int argc, char **argv) {
   if (argc < 2) {
@@ -38,7 +47,10 @@ int main(int argc, char **argv) {
   bool lowlight = false, debug = false;
   std::string enhStages = "gamma,blur";
   double palmThr = 0.3, startThr = 0.5;
-  int frames = 3;
+  int frames = 3, trials = 0;
+  double jitter = 0;
+  bool noScan = false, noTemporal = false, flip = false;
+  double tmin = -1;
   for (int i = 2; i < argc; ++i) {
     const std::string a = argv[i];
     auto next = [&]() -> const char * {
@@ -70,6 +82,18 @@ int main(int argc, char **argv) {
     } // e.g. gamma,blur  (subset of gamma,blur,clahe)
     else if (a == "--debug") {
       debug = true;
+    } else if (a == "--jitter") {
+      jitter = std::atof(next());
+    } else if (a == "--trials") {
+      trials = std::atoi(next());
+    } else if (a == "--tmin") {
+      tmin = std::atof(next());
+    } else if (a == "--flip") {
+      flip = true;
+    } else if (a == "--no-scan") {
+      noScan = true;
+    } else if (a == "--no-temporal") {
+      noTemporal = true;
     }
   }
 
@@ -89,6 +113,7 @@ int main(int argc, char **argv) {
   cfg.landmarkModel = dir + "/" + kHandModelFile;
   cfg.palmScore = float(palmThr);
   cfg.presenceStart = float(startThr);
+  cfg.scanFallback = !noScan;
   LandmarkHandTracker tracker(cfg);
   if (!tracker.ok()) {
     std::fprintf(stderr, "tracker: %s\n", tracker.error().c_str());
@@ -103,7 +128,63 @@ int main(int argc, char **argv) {
   enh.useGamma = enhStages.find("gamma") != std::string::npos;
   enh.useClahe = enhStages.find("clahe") != std::string::npos;
   enh.maxBlurSigma = enhStages.find("blur") != std::string::npos ? 2.2f : 0.f;
+  enh.useTemporal = !noTemporal;
+  if (tmin > 0) enh.temporalMin = float(tmin);
   cv::RNG rng(1234);
+
+  // One test frame: crop, jitter, darken, add sensor noise
+  auto degrade = [&](cv::Mat frame) {
+    if (crop.area() > 0) {
+      frame = frame(crop & cv::Rect(0, 0, frame.cols, frame.rows)).clone();
+    }
+    if (flip) {
+      cv::flip(frame, frame, 1);
+    }
+    if (jitter > 0) {
+      const cv::Matx23f M(1, 0, float(rng.uniform(-jitter, jitter)), 0, 1,
+                          float(rng.uniform(-jitter, jitter)));
+      cv::warpAffine(frame, frame, M, frame.size(), cv::INTER_LINEAR,
+                     cv::BORDER_REPLICATE);
+    }
+    if (dark != 1.0) {
+      frame.convertTo(frame, -1, dark, 0);
+    }
+    if (noise > 0) {
+      cv::Mat n(frame.size(), CV_16SC3), f16;
+      rng.fill(n, cv::RNG::NORMAL, cv::Scalar::all(0), cv::Scalar::all(noise));
+      frame.convertTo(f16, CV_16SC3);
+      f16 += n;
+      f16.convertTo(frame, CV_8UC3);
+    }
+    return frame;
+  };
+
+  if (trials > 0) {
+    if (still.empty()) {
+      std::fprintf(stderr, "--trials needs a still image\n");
+      return 1;
+    }
+    int ok = 0;
+    double latency = 0;
+    for (int t = 0; t < trials; ++t) {
+      tracker.reset();
+      LowLightEnhancer e = enh; // same settings, fresh history
+      e.setMode(lowlight ? LowLightEnhancer::Mode::On : LowLightEnhancer::Mode::Off);
+      HandState h;
+      for (int f = 0; f < 15; ++f) {
+        const cv::Mat &proc = e.apply(degrade(still));
+        tracker.process(proc, 1.0 / 30.0, h);
+        if (h.left.valid || h.right.valid) {
+          ++ok;
+          latency += f + 1;
+          break;
+        }
+      }
+    }
+    std::printf("SUMMARY cold success=%d/%d meanFramesToFind=%.1f\n", ok, trials,
+                ok ? latency / ok : 0.0);
+    return 0;
+  }
 
   cv::Mat view;
   HandState hs;
@@ -115,20 +196,7 @@ int main(int argc, char **argv) {
     if (still.empty() && (!cap.read(frame) || frame.empty())) {
       break;
     }
-    if (crop.area() > 0) {
-      frame = frame(crop & cv::Rect(0, 0, frame.cols, frame.rows)).clone();
-    }
-    if (dark != 1.0) {
-      frame.convertTo(frame, -1, dark, 0);
-    }
-    if (noise > 0) {
-      cv::Mat n(frame.size(), CV_16SC3);
-      rng.fill(n, cv::RNG::NORMAL, cv::Scalar::all(0), cv::Scalar::all(noise));
-      cv::Mat f16;
-      frame.convertTo(f16, CV_16SC3);
-      f16 += n;
-      f16.convertTo(frame, CV_8UC3);
-    }
+    frame = degrade(frame);
 
     const cv::Mat &proc = enh.apply(frame);
     tracker.process(proc, 1.0 / 30.0, hs);

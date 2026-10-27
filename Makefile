@@ -8,7 +8,7 @@ CAM        ?= 0
 
 .DEFAULT_GOAL := help
 
-.PHONY: all help configure build clean distclean rebuild run list-audio models probe
+.PHONY: all help configure build clean distclean rebuild run list-audio models probe test test-asan
 
 all: build
 
@@ -28,6 +28,8 @@ help:
 	@echo "  make run CAM=1             Use camera index 1 (default 0)"
 	@echo "  make list-audio            Show .wav files available in $(AUDIO_DIR)/"
 	@echo "  make models                Download hand-tracking models into models/ (run once)"
+	@echo "  make test                  Build and run the unit tests (ctest)"
+	@echo "  make test-asan             Same, under AddressSanitizer + UBSan (separate build-asan/)"
 	@echo "  make probe                 Build tools/hand_probe (test tracker on an image/video, no camera)"
 	@echo ""
 	@echo "Overridable vars:  BUILD_DIR=$(BUILD_DIR)  BUILD_TYPE=$(BUILD_TYPE)  AUDIO_DIR=$(AUDIO_DIR)  CAM=$(CAM)"
@@ -64,6 +66,16 @@ models:
 probe: build
 	$(CMAKE) --build $(BUILD_DIR) --target hand_probe -j $(JOBS)
 	@echo "Built $(BUILD_DIR)/hand_probe  (usage: $(BUILD_DIR)/hand_probe photo.jpg --out result.png)"
+
+# Unit tests. test_tracker needs the models (make models) and is skipped without them
+test: build
+	cd $(BUILD_DIR) && ctest --output-on-failure
+
+test-asan:
+	$(CMAKE) -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DAUDIOGESTURE_WERROR=ON \
+		-DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
+	$(CMAKE) --build build-asan -j $(JOBS)
+	cd build-asan && ASAN_OPTIONS=detect_leaks=0 ctest --output-on-failure
 
 # Audio listing
 list-audio:

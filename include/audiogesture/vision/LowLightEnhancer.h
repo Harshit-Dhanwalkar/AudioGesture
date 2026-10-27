@@ -6,12 +6,18 @@
 //  than highlights. g is chosen so frame's mean luma lands near `target`:
 //  (mean/255)^g = target  =>   g = ln(target) / ln(mean/255) and is clamped to
 //  [0.4, 1] so a nearly black frame doesn't turn into pure noise
+//  0. Motion-adaptive temporal denoise (before the lift, dark scenes only):
+//  sensor noise is independent from frame to frame, the scene is not, so a
+//  recursive average acc += a*(cur - acc) cuts noise by ~sqrt(1/a) where
+//  nothing moves. Per pixel, a grows with |cur - acc| (a = d/(d+T), floor aMin)
+//  so a moving hand is taken from the new frame almost as-is: no ghost trails.
 //  2. CLAHE on L channel of Lab.  Contrast-limited adaptive histogram
 //  equalisation works on small tiles, so a hand lit by a monitor gets local
 //  contrast even when rest of room is black; clip limit stops it blowing up sensor noise
 
 #include <algorithm>
 #include <cmath>
+#include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <vector>
 
@@ -23,6 +29,10 @@ public:
   // sweeps them). CLAHE is off by default: in testing it amplified noise enough
   // to make detectors fail more often
   bool useGamma = true, useClahe = false;
+  bool useTemporal = true;  // motion-adaptive frame averaging (see above)
+  float temporalMin = 0.50f; // smallest blend weight of the new frame (~2-frame average;
+                             // 0.3 smeared hands and hurt palm detection in tests)
+  float temporalT = 14.f;    // 8-bit difference at which a = 0.5: above ~noise, below hand motion
   float maxBlurSigma =
       2.2f; // px; blur applied at pure black, fading to 0 at switch-off level
 
@@ -67,7 +77,15 @@ public:
     }
 
     if (!active_) {
+      accValid_ = false; // history is stale once we leave dark mode
       return bgr;
+    }
+
+    // 0. temporal denoise on the raw 8-bit frame
+    const cv::Mat *src = &bgr;
+    if (useTemporal) {
+      temporalDenoise(bgr);
+      src = &dn_;
     }
 
     // 1. \gamma lift towards a mean luma of `kTarget`
@@ -83,9 +101,9 @@ public:
               cv::saturate_cast<uchar>(255.0 * std::pow(i / 255.0, gamma_));
         }
       }
-      cv::LUT(bgr, lut_, lifted_);
+      cv::LUT(*src, lut_, lifted_);
     } else {
-      bgr.copyTo(lifted_);
+      src->copyTo(lifted_);
     }
 
     // 1b. Lift amplifies sensor noise by same factor as signal and CNNs read
@@ -117,6 +135,28 @@ public:
   }
 
 private:
+  void temporalDenoise(const cv::Mat &bgr) {
+    bgr.convertTo(curF_, CV_32FC3);
+    if (!accValid_ || acc_.size() != curF_.size()) {
+      curF_.copyTo(acc_);
+      accValid_ = true;
+    } else {
+      // per-pixel change, averaged over channels and blurred a little so a
+      // single noisy pixel cannot open the gate on its own
+      cv::absdiff(curF_, acc_, diff_);
+      cv::transform(diff_, diff1_, cv::Matx13f(1.f / 3, 1.f / 3, 1.f / 3));
+      cv::GaussianBlur(diff1_, diff1_, cv::Size(5, 5), 0);
+      cv::add(diff1_, cv::Scalar(temporalT), den_);
+      cv::divide(diff1_, den_, alpha_);
+      cv::max(alpha_, temporalMin, alpha_);
+      cv::merge(std::vector<cv::Mat>{alpha_, alpha_, alpha_}, alpha3_);
+      cv::subtract(curF_, acc_, diff_);
+      cv::multiply(diff_, alpha3_, diff_);
+      cv::add(acc_, diff_, acc_);
+    }
+    acc_.convertTo(dn_, CV_8UC3);
+  }
+
   static constexpr float kOnBelow =
       85.f; // switch on below this mean luma (0..255)
   static constexpr float kOffAbove =
@@ -129,6 +169,8 @@ private:
   float meanLuma_ = 128.f, gamma_ = 1.f;
 
   cv::Mat small_, gray_, lut_, lifted_, lab_, out_;
+  cv::Mat curF_, acc_, diff_, diff1_, den_, alpha_, alpha3_, dn_;
+  bool accValid_ = false;
   std::vector<cv::Mat> planes_;
   cv::Ptr<cv::CLAHE> clahe_;
 };

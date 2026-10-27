@@ -1,4 +1,4 @@
-#include "GestureTracker.h"
+#include "audiogesture/vision/GestureTracker.h"
 
 #include <algorithm>
 #include <iostream>

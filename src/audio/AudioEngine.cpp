@@ -1,4 +1,4 @@
-#include "AudioEngine.h"
+#include "audiogesture/audio/AudioEngine.h"
 
 #include <portaudio.h>
 #include <sndfile.h>
@@ -72,13 +72,7 @@ bool AudioEngine::start() {
     return false;
   }
   devSR_ = di->defaultSampleRate;
-
-  // One-pole smoother: y += a * (target - y), a = 1 - \exp(-1 / (\tau * sr))
-  // Time constant tau sets how fast we follow jittery hand data:
-  // long \tau = smooth but laggy
-  // short \tau = responsive. 40 ms / 15 ms is a good start
-  aSlow_ = 1.0 - std::exp(-1.0 / (0.040 * devSR_));
-  aFast_ = 1.0 - std::exp(-1.0 / (0.015 * devSR_));
+  setupSmoothing();
 
   if (Pa_OpenDefaultStream(&stream_, 0, 2, paFloat32, devSR_, 256,
                            &AudioEngine::paCallback, this) != paNoError) {
@@ -86,6 +80,24 @@ bool AudioEngine::start() {
   }
 
   return Pa_StartStream(stream_) == paNoError;
+}
+
+// One-pole smoother: y += a * (target - y), a = 1 - exp(-1 / (tau * sr)).
+// Time constant tau sets how fast we follow jittery hand data: long = smooth
+// but laggy, short = responsive. 40 ms / 15 ms is a good start.
+void AudioEngine::setupSmoothing() {
+  aSlow_ = 1.0 - std::exp(-1.0 / (0.040 * devSR_));
+  aFast_ = 1.0 - std::exp(-1.0 / (0.015 * devSR_));
+}
+
+void AudioEngine::initOffline(double deviceSampleRate) {
+  devSR_ = deviceSampleRate;
+  setupSmoothing();
+}
+
+void AudioEngine::loadSamples(std::vector<float> mono, double fileSampleRate) {
+  mono_ = std::move(mono);
+  fileSR_ = fileSampleRate;
 }
 
 void AudioEngine::stop() {
@@ -239,4 +251,6 @@ void AudioEngine::render(float *out, unsigned long frames) {
 
   ringPos_.store(wpos, std::memory_order_release);
   headNorm_.store(head_ / static_cast<double>(N), std::memory_order_relaxed);
+  segPhase_.store(static_cast<float>(std::fmod(head_, segLen) / segLen),
+                  std::memory_order_relaxed);
 }

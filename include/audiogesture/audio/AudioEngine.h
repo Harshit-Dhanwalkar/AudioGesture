@@ -45,8 +45,22 @@ public:
   bool start();
   void stop();
 
+  // Headless use (unit tests, offline rendering): give the engine samples and a
+  // sample rate without touching the disk or PortAudio, then pull audio with
+  // render().
+  void loadSamples(std::vector<float> mono, double fileSampleRate);
+  void initOffline(double deviceSampleRate);
+
+  // Fills `frames` interleaved stereo frames. Called from the PortAudio
+  // callback; public so tests can drive it directly.
+  void render(float *out, unsigned long frames);
+
   // Thread-safe setters: write "targets"; audio thread smooths toward them
   void setParams(const EngineParams &p);
+
+  // Where the read head is inside the current segment (0 = left edge of the
+  // grid, 1 = right edge). Updated once per audio buffer.
+  float segmentPhase() const { return segPhase_.load(std::memory_order_relaxed); }
 
   double playheadNorm() const {
     return headNorm_.load(std::memory_order_relaxed);
@@ -67,8 +81,8 @@ private:
   static int paCallback(const void *, void *out, unsigned long frames,
                         const PaStreamCallbackTimeInfo *, PaStreamCallbackFlags,
                         void *user);
-  void render(float *out, unsigned long frames);
   void spawnGrain();
+  void setupSmoothing();
 
   struct Grain {
     bool active = false;
@@ -92,6 +106,7 @@ private:
   std::atomic<float> tStretch_{1.f}, tGrain_{120.f}, tPitch_{0.f}, tDir_{1.f},
       tGain_{0.8f}, tInvert_{1.f}, tEnvL_{1.f}, tEnvR_{1.f}, tSeg_{4.f};
   std::atomic<double> headNorm_{0.0};
+  std::atomic<float> segPhase_{0.f};
 
   // Output ring for visualizer (see copyRecent)
   static constexpr size_t kRing = 1 << 15; // 32768 samples, power of two
