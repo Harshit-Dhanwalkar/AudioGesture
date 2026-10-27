@@ -1,14 +1,14 @@
 # AudioGesture
 
 <a href="https://github.com/Harshit-Dhanwalkar/QMC/actions/workflows/ci.yml">
-  <img src="https://img.shields.io/github/actions/workflow/status/Harshit-Dhanwalkar/QMC/ci.yml?branch=main&label=build_and_tests" alt="CI Status">
+  <img src="https://img.shields.io/github/actions/workflow/status/Harshit-Dhanwalkar/AudioGesture/ci.yml?branch=main&label=build_and_tests" alt="CI Status">
 </a>
 
 <div align="center">
   <img src="./assets/AudioGesture_Screenshot.png" alt="AudioGesture Screenshot demo" width="400">
 </div>
 
-Hold sound between your hands. A webcam tracks both hands with a 21-joint skeleton and audio spectrum is drawn inside shape your hands make; stretch, squash, tilt or flip that shape and audio follows (granular time-stretch, per-edge amplitude, phase inversion, reverse).
+AudioGesture is a real-time, C++ granular audio engine controlled entirely by your hands. A webcam tracks both hands with a 21-joint skeleton, and the space between them becomes an elastic, interactive audio grid. Stretch, squash, tilt, or flip the shape, and the audio (and visualizer) follows instantly.
 
 ```
    left hand                                     right hand
@@ -17,7 +17,6 @@ Hold sound between your hands. A webcam tracks both hands with a 21-joint skelet
       |  grid: shorter edge = shorter bars        |      push closer -> faster
       |-------------------------------------------|      fist / tilt -> trapezium / triangle
 ```
-
 
 ## Gestures
 
@@ -35,16 +34,16 @@ There is no decorative waveform: every pixel is either grid or measured audio (s
 
 ## Keys
 
-| Key       | Action                                                           |
-| --------- | ---------------------------------------------------------------- |
+| Key       | Action                                                     |
+| --------- | ---------------------------------------------------------- |
 | `c`       | Calibrate: pose holded becomes 1x speed and full amplitude |
-| `s`       | Segment length held between hands: 1 / 2 / 4 / 8 s               |
-| `v`       | Bars <-> mirrored bars                                           |
-| `p`       | Pitch from hand height on/off                                    |
-| `l`       | Low-light boost: auto -> on -> off                               |
-| `t`       | Temporal denoise (part of boost) on/off                          |
-| `d`       | Show tracker's search windows                                    |
-| `q` / Esc | Quit                                                             |
+| `s`       | Segment length held between hands: 1 / 2 / 4 / 8 s         |
+| `v`       | Bars <-> mirrored bars                                     |
+| `p`       | Pitch from hand height on/off                              |
+| `l`       | Low-light boost: auto -> on -> off                         |
+| `t`       | Temporal denoise (part of boost) on/off                    |
+| `d`       | Show tracker's search windows                              |
+| `q` / Esc | Quit                                                       |
 
 ## Build and run
 
@@ -68,14 +67,14 @@ make test          # unit tests; test_tracker is skipped unless models are downl
 make test-asan     # same under AddressSanitizer + UBSan
 ```
 
-| Test                | Checks                                                                                                                                                                   |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `test_audio_engine` | gain ramp 0->1 gets louder across the segment, -1 is the exact phase inverse of +1, stretch 2 halves the head speed, reverse wraps backwards                             |
-| `test_mapper`       | distance -> stretch, edge heights -> signed gains (rectangle, fist, upside-down, twist), single hand holds values, sweep vs stretch, calibrate, pitch                    |
-| `test_spectrum`     | a sine lands in the right log-spaced bar, silence decays                                                                                                                 |
-| `test_enhancer`     | dark frames get brighter, bright ones untouched, denoise lowers noise without smearing a moving block                                                                    |
-| `test_grid`         | bars stay inside the trapezium / triangle / inverted / twisted quad                                                                                                      |
-| `test_tracker`      | models load on this OpenCV, no phantom hands on black or noise frames; if `tests/data/hand.jpg` exists a real hand must be found |
+| Test                | Checks                                                                                                                                                |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_audio_engine` | gain ramp 0->1 gets louder across the segment, -1 is the exact phase inverse of +1, stretch 2 halves the head speed, reverse wraps backwards          |
+| `test_mapper`       | distance -> stretch, edge heights -> signed gains (rectangle, fist, upside-down, twist), single hand holds values, sweep vs stretch, calibrate, pitch |
+| `test_spectrum`     | a sine lands in the right log-spaced bar, silence decays                                                                                              |
+| `test_enhancer`     | dark frames get brighter, bright ones untouched, denoise lowers noise without smearing a moving block                                                 |
+| `test_grid`         | bars stay inside the trapezium / triangle / inverted / twisted quad                                                                                   |
+| `test_tracker`      | models load on this OpenCV, no phantom hands on black or noise frames; if `tests/data/hand.jpg` exists a real hand must be found                      |
 
 ## How tracker works
 
