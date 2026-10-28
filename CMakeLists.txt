@@ -16,12 +16,12 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(PORTAUDIO REQUIRED IMPORTED_TARGET portaudio-2.0)
 pkg_check_modules(SNDFILE   REQUIRED IMPORTED_TARGET sndfile)
 
-# Everything except main(): one library so the app, the probe tool and the
-# tests all link the same code.
 add_library(audiogesture_core STATIC
   src/audio/AudioEngine.cpp
+  src/audio/Recorder.cpp
   src/audio/SpectrumAnalyzer.cpp
   src/control/GestureMapper.cpp
+  src/control/Settings.cpp
   src/ui/SpectrumGrid.cpp
   src/vision/HandTracker.cpp
   src/vision/SkinHandTracker.cpp)
@@ -33,7 +33,7 @@ if(AUDIOGESTURE_WERROR)
   target_compile_options(audiogesture_core PRIVATE -Werror)
 endif()
 
-# The app
+# App
 add_executable(audiogesture src/main.cpp)
 target_link_libraries(audiogesture PRIVATE audiogesture_core)
 target_compile_options(audiogesture PRIVATE -Wall -Wextra -O2)
@@ -45,7 +45,7 @@ target_link_libraries(hand_probe PRIVATE audiogesture_core)
 # Tests: `make test`  (= cmake --build build && ctest --test-dir build)
 if(AUDIOGESTURE_BUILD_TESTS)
   enable_testing()
-  set(AG_TESTS test_audio_engine test_mapper test_spectrum test_enhancer test_grid test_tracker)
+  set(AG_TESTS test_audio_engine test_recorder test_settings test_mapper test_spectrum test_enhancer test_grid test_tracker)
   foreach(t ${AG_TESTS})
     add_executable(${t} tests/${t}.cpp)
     target_link_libraries(${t} PRIVATE audiogesture_core)

@@ -1,6 +1,6 @@
 # AudioGesture
 
-<a href="https://github.com/Harshit-Dhanwalkar/QMC/actions/workflows/ci.yml">
+<a href="https://github.com/Harshit-Dhanwalkar/AudioGesture/actions/workflows/ci.yml">
   <img src="https://img.shields.io/github/actions/workflow/status/Harshit-Dhanwalkar/AudioGesture/ci.yml?branch=main&label=build_and_tests" alt="CI Status">
 </a>
 
@@ -8,7 +8,7 @@
   <img src="./assets/AudioGesture_Screenshot.png" alt="AudioGesture Screenshot demo" width="400">
 </div>
 
-AudioGesture is a real-time, C++ granular audio engine controlled entirely by your hands. A webcam tracks both hands with a 21-joint skeleton, and the space between them becomes an elastic, interactive audio grid. Stretch, squash, tilt, or flip the shape, and the audio (and visualizer) follows instantly.
+AudioGesture is a real-time, C++ granular audio engine controlled entirely by your hands. A webcam tracks both hands with a 21-joint skeleton, and space between them becomes an elastic, interactive audio grid. Stretch, squash, tilt, or flip shape, and audio (and visualizer) follows instantly.
 
 ```
    left hand                                     right hand
@@ -29,7 +29,7 @@ AudioGesture is a real-time, C++ granular audio engine controlled entirely by yo
 | Mean height of both hands (key `p`)             | Pitch +-12 semitones (off by default)                                                                                                                               |
 
 Grid is drawn from same numbers audio engine receives.
-The white playhead shows where read head is inside current 4-second segment, i.e. where engine is sampling gain ramp.
+White playhead shows where read head is inside current 4-second segment, i.e. where engine is sampling gain ramp.
 There is no decorative waveform: every pixel is either grid or measured audio (spectrum of signal leaving speakers, so stretch/pitch/reverse show up).
 
 ## Keys
@@ -42,8 +42,21 @@ There is no decorative waveform: every pixel is either grid or measured audio (s
 | `p`       | Pitch from hand height on/off                              |
 | `l`       | Low-light boost: auto -> on -> off                         |
 | `t`       | Temporal denoise (part of boost) on/off                    |
+| `r`       | Start / stop recording what you hear to `recordings/*.wav` |
 | `d`       | Show tracker's search windows                              |
 | `q` / Esc | Quit                                                       |
+
+## Recording, settings, drop-outs
+
+- **Record (`r`, or `--record out.wav`)**: saves exactly what leaves speakers as a stereo 32-bit float
+  WAV in `recordings/`. Audio thread only copies samples into a lock-free ring; a separate thread
+  writes file, so recording can't glitch playback. A red `REC m:ss` badge shows while it runs.
+- **Stereo is kept**: a stereo file plays in stereo (a mono file is centred).
+- **Settings survive restarts**: your calibration (`c`), segment length, pitch, denoise, low-light mode
+  and grid style are saved on quit to `~/.config/audiogesture/settings.ini` (`$XDG_CONFIG_HOME` is honoured).
+  Plain `key = value` lines; bad values are ignored or clamped.
+- **Short drop-outs are bridged**: if tracker loses a hand for less than 0.4 s, grid and audio stay
+  where they were instead of flickering; after that grid hides and next sighting snaps into place.
 
 ## Build and run
 
@@ -69,11 +82,13 @@ make test-asan     # same under AddressSanitizer + UBSan
 
 | Test                | Checks                                                                                                                                                |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test_audio_engine` | gain ramp 0->1 gets louder across the segment, -1 is the exact phase inverse of +1, stretch 2 halves the head speed, reverse wraps backwards          |
+| `test_audio_engine` | gain ramp 0->1 gets louder across segment, -1 is exact phase inverse of +1, stretch 2 halves head speed, reverse wraps backwards          |
 | `test_mapper`       | distance -> stretch, edge heights -> signed gains (rectangle, fist, upside-down, twist), single hand holds values, sweep vs stretch, calibrate, pitch |
-| `test_spectrum`     | a sine lands in the right log-spaced bar, silence decays                                                                                              |
+| `test_spectrum`     | a sine lands in right log-spaced bar, silence decays                                                                                              |
 | `test_enhancer`     | dark frames get brighter, bright ones untouched, denoise lowers noise without smearing a moving block                                                 |
-| `test_grid`         | bars stay inside the trapezium / triangle / inverted / twisted quad                                                                                   |
+| `test_grid`         | bars stay inside trapezium / triangle / inverted / twisted quad                                                                                   |
+| `test_recorder`     | recorded WAV equals what engine played, bit for bit; double start/stop and bad paths are safe                                                     |
+| `test_settings`     | save/load round trip, clamping, garbage lines ignored                                                                                                 |
 | `test_tracker`      | models load on this OpenCV, no phantom hands on black or noise frames; if `tests/data/hand.jpg` exists a real hand must be found                      |
 
 ## How tracker works
