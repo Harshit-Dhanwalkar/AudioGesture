@@ -147,5 +147,52 @@ int main() {
     }
   }
 
+  // 6) Freeze: the read head stops but sound continues; unfreezing resumes
+  {
+    auto ep = makeEngine();
+    AudioEngine &e = *ep;
+    run(e, 0.3);
+    EngineParams p;
+    p.freeze = true;
+    e.setParams(p);
+    run(e, 0.3); // let the head come to rest (smoothed)
+    const double h0 = e.playheadNorm();
+    const auto out = run(e, 1.0);
+    CHECK_NEAR(e.playheadNorm(), h0, 1e-3);
+    CHECK(rms(out, 0, out.size()) > 0.05); // a sustained texture, not silence
+    p.freeze = false;
+    e.setParams(p);
+    run(e, 0.5);
+    CHECK(e.playheadNorm() > h0 + 0.02);
+  }
+
+  // 7) Filters: low-pass kills a 6 kHz tone, high-pass kills a 100 Hz tone,
+  //    defaults leave both alone
+  {
+    auto tone = [](double hz) {
+      std::vector<float> s(size_t(4 * kSR));
+      for (size_t n = 0; n < s.size(); ++n) s[n] = float(0.6 * std::sin(6.283185307 * hz * n / kSR));
+      auto e = std::make_unique<AudioEngine>();
+      e->loadSamples(std::move(s), kSR);
+      e->initOffline(kSR);
+      return e;
+    };
+    auto level = [&](double hz, float lp, float hp) {
+      auto e = tone(hz);
+      EngineParams p;
+      p.lpHz = lp;
+      p.hpHz = hp;
+      e->setParams(p);
+      run(*e, 0.5); // settle smoothing + filter state
+      const auto o = run(*e, 0.5);
+      return rms(o, 0, o.size());
+    };
+    const double base6k = level(6000, 20000, 20), base100 = level(100, 20000, 20);
+    CHECK(base6k > 0.2 && base100 > 0.2);
+    CHECK(level(6000, 500, 20) < 0.1 * base6k);   // low-pass at 500 Hz
+    CHECK(level(100, 20000, 1200) < 0.1 * base100); // high-pass at 1.2 kHz
+    CHECK(level(100, 500, 20) > 0.8 * base100);   // ...but the low tone passes the low-pass
+  }
+
   TEST_MAIN_END();
 }

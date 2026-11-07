@@ -20,6 +20,19 @@ Hand mk(float cx, float wristY, float tipY) {
   return h;
 }
 
+// A full skeleton: palm length = 0.4 * (wrist-to-tip height). pinch = thumb-index
+// distance and open = knuckle width, both as ratios of the palm length.
+Hand skel(float cx, float wristY, float tipY, float pinch, float open, float aspect = 4.f / 3.f) {
+  Hand h = mk(cx, wristY, tipY);
+  const float y9 = wristY + 0.4f * (tipY - wristY), palm = 0.4f * std::fabs(wristY - tipY);
+  h.lm[9] = {cx, y9};
+  h.lm[5] = {cx - 0.5f * open * palm / aspect, y9};
+  h.lm[17] = {cx + 0.5f * open * palm / aspect, y9};
+  h.lm[4] = {cx - 0.5f * pinch * palm / aspect, y9 - 0.01f};
+  h.lm[8] = {cx + 0.5f * pinch * palm / aspect, y9 - 0.01f};
+  return h;
+}
+
 void settle(GestureMapper &m, const HandState &hs, int frames = 90) {
   for (int i = 0; i < frames; ++i) {
     m.update(hs, 1.0 / 30.0);
@@ -188,6 +201,48 @@ int main() {
     CHECK_NEAR(out.refHeight, 0.2, 1e-6);
     CHECK_NEAR(out.segSec, 8.0, 1e-6);
     CHECK(out.pitchOn);
+  }
+
+  // effects: pinch freezes (with hysteresis), palm turned edge-on filters
+  {
+    GestureMapper m;
+    auto both = [&](float pinchL, float openL, float pinchR, float openR) {
+      hs.left = skel(0.25f, 0.9f, 0.45f, pinchL, openL);
+      hs.right = skel(0.75f, 0.9f, 0.45f, pinchR, openR);
+      settle(m, hs, 60);
+    };
+    both(1.2f, 0.7f, 1.2f, 0.7f); // relaxed open hands: nothing happens
+    CHECK(!m.frozen());
+    CHECK_NEAR(m.lowpassHz(), 20000.0, 50.0);
+    CHECK_NEAR(m.highpassHz(), 20.0, 0.5);
+
+    both(1.2f, 0.7f, 0.1f, 0.7f); // right pinch
+    CHECK(m.frozen() && m.params().freeze);
+    both(1.2f, 0.7f, 0.35f, 0.7f); // between the thresholds: still pinched
+    CHECK(m.frozen());
+    both(1.2f, 0.7f, 0.6f, 0.7f); // released
+    CHECK(!m.frozen());
+
+    both(1.2f, 0.12f, 1.2f, 0.12f); // both palms edge-on
+    CHECK_NEAR(m.highpassHz(), 1200.0, 30.0);  // left hand -> high-pass up
+    CHECK_NEAR(m.lowpassHz(), 400.0, 10.0);    // right hand -> low-pass down
+    both(1.2f, 0.7f, 1.2f, 0.7f);
+    CHECK_NEAR(m.lowpassHz(), 20000.0, 50.0);
+
+    // effects off: bypass even with a pinch and edge-on palms
+    m.effectsOn = false;
+    both(0.1f, 0.12f, 0.1f, 0.12f);
+    CHECK(!m.frozen());
+    CHECK_NEAR(m.lowpassHz(), 20000.0, 1.0);
+    m.effectsOn = true;
+
+    // pinch with the hand then losing it: the sound must not stay frozen
+    both(0.1f, 0.7f, 1.2f, 0.7f);
+    CHECK(m.frozen());
+    HandState gone = hs;
+    gone.left = Hand{};
+    for (int i = 0; i < 30; ++i) m.update(gone, 1.0 / 30.0); // 1 s, past the hold time
+    CHECK(!m.frozen());
   }
 
   TEST_MAIN_END();

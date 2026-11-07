@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "audiogesture/audio/Biquad.h"
 #include "audiogesture/audio/Recorder.h"
 
 struct EngineParams {
@@ -34,6 +35,14 @@ struct EngineParams {
   // Signed: +1 full, 0 silent, -1 full but phase-flipped (hand upside down)
   float envL = 1.0f, envR = 1.0f;
   float segSec = 4.0f;
+
+  // Hold the read head still: grains keep playing from one spot (with a little
+  // random spray so it sounds like a pad, not a buzz)
+  bool freeze = false;
+
+  // Filters after the gain stage. Defaults mean "bypassed".
+  float lpHz = 20000.f; // low-pass cutoff
+  float hpHz = 20.f;    // high-pass cutoff
 };
 
 class AudioEngine {
@@ -111,7 +120,8 @@ private:
 
   // Targets written by UI thread
   std::atomic<float> tStretch_{1.f}, tGrain_{120.f}, tPitch_{0.f}, tDir_{1.f}, tGain_{0.8f},
-      tInvert_{1.f}, tEnvL_{1.f}, tEnvR_{1.f}, tSeg_{4.f};
+      tInvert_{1.f}, tEnvL_{1.f}, tEnvR_{1.f}, tSeg_{4.f}, tFreeze_{0.f},
+      tLp_{14.287f}, tHp_{4.322f}; // tLp_/tHp_ hold log2(cutoff Hz)
   std::atomic<double> headNorm_{0.0};
   std::atomic<float> segPhase_{0.f};
 
@@ -135,5 +145,14 @@ private:
   int countdown_ = 0;
   double aSlow_ = 0.0;
   float aFast_ = 0.0; // one-pole smoothing coefficients
+  float freeze_ = 0.f;                // 0 = playing, 1 = frozen (smoothed)
+  float lpLog_ = 14.287f, hpLog_ = 4.322f; // smoothed log2(cutoff)
+  Biquad lp_[2], hp_[2];              // per channel
+  int filtTick_ = 0;
+  uint32_t rng_ = 0x9E3779B9u;
+  float rand01() {                    // xorshift32, audio-thread only
+    rng_ ^= rng_ << 13; rng_ ^= rng_ >> 17; rng_ ^= rng_ << 5;
+    return float(rng_ >> 8) * (1.f / 16777216.f);
+  }
   std::array<Grain, kMaxGrains> grains_;
 };
