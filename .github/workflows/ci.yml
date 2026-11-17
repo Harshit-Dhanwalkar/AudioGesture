@@ -58,9 +58,25 @@ jobs:
       - name: Unit tests
         run: cd build && ASAN_OPTIONS=detect_leaks=0 ctest --output-on-failure
 
-  # Downloads the MediaPipe models and runs the tracker test against them on
-  # both OpenCV versions: catches "this OpenCV cannot load the model" and output
-  # order mix-ups (e.g. reading handedness as presence) before users do.
+  # Recorder shares a ring buffer between audio and writer threads
+  tsan:
+    name: ThreadSanitizer (recorder)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $DEPS
+      - name: Build and run test_recorder
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=thread"
+          cmake --build build -j"$(nproc)" --target test_recorder
+          build/test_recorder
+
+  # Downloads MediaPipe models and runs tracker test against them on both
+  # OpenCV versions: catches "this OpenCV cannot load model" and output order
+  # mix-ups (e.g. reading handedness as presence) before users do
   models:
     name: tracker + models (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

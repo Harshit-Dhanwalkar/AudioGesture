@@ -42,7 +42,7 @@ public:
   // bars/peaks: SpectrumAnalyzer output (0..1). playhead: 0..1 position of the
   // read head inside the current segment. dirSign: +1 forward, -1 reverse.
   void draw(cv::Mat &img, const RigGeometry &g, const std::vector<float> &bars,
-            const std::vector<float> &peaks, float playhead, float dirSign) const;
+            const std::vector<float> &peaks, float playhead, float dirSign, bool frozen = false) const;
 
 private:
   Style style_ = Style::Bars;

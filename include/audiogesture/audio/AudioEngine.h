@@ -17,13 +17,15 @@
 #include <string>
 #include <vector>
 
+#include "audiogesture/audio/Biquad.h"
+#include "audiogesture/audio/Recorder.h"
+
 struct EngineParams {
-  float stretch = 1.0f; // time-stretch factor: 2 = twice as long (half speed),
-                        // 0.5 = double speed
+  float stretch = 1.0f;    // time-stretch factor: 2 = twice as long (half speed),
+                           // 0.5 = double speed
   float grainMs = 120.0f;  // grain length in milliseconds
   float pitchSemis = 0.0f; // pitch shift in semitones
-  float direction =
-      1.0f; // +1 forward, -1 reverse, values between = scrub through zero
+  float direction = 1.0f;  // +1 forward, -1 reverse, values between = scrub through zero
   float gain = 0.8f;
   float invert = 1.0f; // +1 normal, -1 phase-flipped (master)
 
@@ -33,6 +35,14 @@ struct EngineParams {
   // Signed: +1 full, 0 silent, -1 full but phase-flipped (hand upside down)
   float envL = 1.0f, envR = 1.0f;
   float segSec = 4.0f;
+
+  // Hold the read head still: grains keep playing from one spot (with a little
+  // random spray so it sounds like a pad, not a buzz)
+  bool freeze = false;
+
+  // Filters after the gain stage. Defaults mean "bypassed".
+  float lpHz = 20000.f; // low-pass cutoff
+  float hpHz = 20.f;    // high-pass cutoff
 };
 
 class AudioEngine {
@@ -40,15 +50,15 @@ public:
   AudioEngine();
   ~AudioEngine();
 
-  bool load(
-      const std::string &path); // WAV/FLAC/OGG (and MP3 with libsndfile >= 1.1)
+  bool load(const std::string &path); // WAV/FLAC/OGG (and MP3 with libsndfile >= 1.1)
   bool start();
   void stop();
 
   // Headless use (unit tests, offline rendering): give the engine samples and a
   // sample rate without touching the disk or PortAudio, then pull audio with
-  // render().
+  // render()
   void loadSamples(std::vector<float> mono, double fileSampleRate);
+  void loadStereo(std::vector<float> left, std::vector<float> right, double fileSampleRate);
   void initOffline(double deviceSampleRate);
 
   // Fills `frames` interleaved stereo frames. Called from the PortAudio
@@ -62,10 +72,8 @@ public:
   // grid, 1 = right edge). Updated once per audio buffer.
   float segmentPhase() const { return segPhase_.load(std::memory_order_relaxed); }
 
-  double playheadNorm() const {
-    return headNorm_.load(std::memory_order_relaxed);
-  }
-  const std::vector<float> &samples() const { return mono_; }
+  double playheadNorm() const { return headNorm_.load(std::memory_order_relaxed); }
+  bool isStereo() const { return !right_.empty(); }
 
   // Visualizer tap
   // Audio callback copies every output sample into a lock-free ring; UI thread
@@ -75,12 +83,20 @@ public:
   // waits on UI
   void copyRecent(float *dst, size_t n) const;
   double outputSampleRate() const { return devSR_; }
+
+  // Record exactly what leaves the speakers (stereo, 32-bit float WAV)
+  // audio thread only copies into a lock-free ring; a writer thread does disk I/O, so recording can
+  // never glitch playback
+  bool startRecording(const std::string &wavPath) { return rec_.start(wavPath, devSR_); }
+  void stopRecording() { rec_.stop(); }
+  bool recording() const { return rec_.active(); }
+  double recordedSeconds() const { return rec_.seconds(); }
+  size_t recordDropped() const { return rec_.dropped(); }
   double fileSampleRate() const { return fileSR_; }
 
 private:
   static int paCallback(const void *, void *out, unsigned long frames,
-                        const PaStreamCallbackTimeInfo *, PaStreamCallbackFlags,
-                        void *user);
+                        const PaStreamCallbackTimeInfo *, PaStreamCallbackFlags, void *user);
   void spawnGrain();
   void setupSmoothing();
 
@@ -93,8 +109,8 @@ private:
   };
   static constexpr int kMaxGrains = 16;
 
-  // Source audio (mono, float)
-  std::vector<float> mono_;
+  // Source audio, float
+  std::vector<float> left_, right_;
   double fileSR_ = 44100.0;
 
   // PortAudio
@@ -103,10 +119,13 @@ private:
   bool paInit_ = false;
 
   // Targets written by UI thread
-  std::atomic<float> tStretch_{1.f}, tGrain_{120.f}, tPitch_{0.f}, tDir_{1.f},
-      tGain_{0.8f}, tInvert_{1.f}, tEnvL_{1.f}, tEnvR_{1.f}, tSeg_{4.f};
+  std::atomic<float> tStretch_{1.f}, tGrain_{120.f}, tPitch_{0.f}, tDir_{1.f}, tGain_{0.8f},
+      tInvert_{1.f}, tEnvL_{1.f}, tEnvR_{1.f}, tSeg_{4.f}, tFreeze_{0.f},
+      tLp_{14.287f}, tHp_{4.322f}; // tLp_/tHp_ hold log2(cutoff Hz)
   std::atomic<double> headNorm_{0.0};
   std::atomic<float> segPhase_{0.f};
+
+  Recorder rec_;
 
   // Output ring for visualizer (see copyRecent)
   static constexpr size_t kRing = 1 << 15; // 32768 samples, power of two
@@ -126,5 +145,14 @@ private:
   int countdown_ = 0;
   double aSlow_ = 0.0;
   float aFast_ = 0.0; // one-pole smoothing coefficients
+  float freeze_ = 0.f;                // 0 = playing, 1 = frozen (smoothed)
+  float lpLog_ = 14.287f, hpLog_ = 4.322f; // smoothed log2(cutoff)
+  Biquad lp_[2], hp_[2];              // per channel
+  int filtTick_ = 0;
+  uint32_t rng_ = 0x9E3779B9u;
+  float rand01() {                    // xorshift32, audio-thread only
+    rng_ ^= rng_ << 13; rng_ ^= rng_ >> 17; rng_ ^= rng_ << 5;
+    return float(rng_ >> 8) * (1.f / 16777216.f);
+  }
   std::array<Grain, kMaxGrains> grains_;
 };

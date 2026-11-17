@@ -1,14 +1,14 @@
 # AudioGesture
 
-<a href="https://github.com/Harshit-Dhanwalkar/QMC/actions/workflows/ci.yml">
-  <img src="https://img.shields.io/github/actions/workflow/status/Harshit-Dhanwalkar/QMC/ci.yml?branch=main&label=build_and_tests" alt="CI Status">
+<a href="https://github.com/Harshit-Dhanwalkar/AudioGesture/actions/workflows/ci.yml">
+  <img src="https://img.shields.io/github/actions/workflow/status/Harshit-Dhanwalkar/AudioGesture/ci.yml?branch=main&label=build_and_tests" alt="CI Status">
 </a>
 
 <div align="center">
   <img src="./assets/AudioGesture_Screenshot.png" alt="AudioGesture Screenshot demo" width="400">
 </div>
 
-Hold sound between your hands. A webcam tracks both hands with a 21-joint skeleton and audio spectrum is drawn inside shape your hands make; stretch, squash, tilt or flip that shape and audio follows (granular time-stretch, per-edge amplitude, phase inversion, reverse).
+AudioGesture is a real-time, C++ granular audio engine controlled entirely by your hands. A webcam tracks both hands with a 21-joint skeleton, and space between them becomes an elastic, interactive audio grid. Stretch, squash, tilt, or flip shape, and audio (and visualizer) follows instantly.
 
 ```
    left hand                                     right hand
@@ -17,7 +17,6 @@ Hold sound between your hands. A webcam tracks both hands with a 21-joint skelet
       |  grid: shorter edge = shorter bars        |      push closer -> faster
       |-------------------------------------------|      fist / tilt -> trapezium / triangle
 ```
-
 
 ## Gestures
 
@@ -28,23 +27,45 @@ Hold sound between your hands. A webcam tracks both hands with a 21-joint skelet
 | A hand upside down                              | That edge goes negative: bars hang from top and audio is phase-inverted. One flipped hand twists grid through zero                                                  |
 | Sweep both hands sideways, fast                 | Latch reverse / forward (pulling apart is ignored, only a pure sweep counts)                                                                                        |
 | Mean height of both hands (key `p`)             | Pitch +-12 semitones (off by default)                                                                                                                               |
+| Pinch thumb and index together (either hand) | **Freeze**: the read head stops and the grains keep playing from that spot with a little random spray, a sustained pad. Release to resume. The playhead turns cyan and says FREEZE |
+| Turn the **left** palm edge-on to the camera (roll)  | High-pass sweeps 20 Hz -> 1.2 kHz (thin out the bass) |
+| Turn the **right** palm edge-on (roll)         | Low-pass sweeps 20 kHz -> 400 Hz (muffle the highs) |
 
 Grid is drawn from same numbers audio engine receives.
-The white playhead shows where read head is inside current 4-second segment, i.e. where engine is sampling gain ramp.
+White playhead shows where read head is inside current 4-second segment, i.e. where engine is sampling gain ramp.
 There is no decorative waveform: every pixel is either grid or measured audio (spectrum of signal leaving speakers, so stretch/pitch/reverse show up).
 
 ## Keys
 
-| Key       | Action                                                           |
-| --------- | ---------------------------------------------------------------- |
+| Key       | Action                                                     |
+| --------- | ---------------------------------------------------------- |
 | `c`       | Calibrate: pose holded becomes 1x speed and full amplitude |
-| `s`       | Segment length held between hands: 1 / 2 / 4 / 8 s               |
-| `v`       | Bars <-> mirrored bars                                           |
-| `p`       | Pitch from hand height on/off                                    |
-| `l`       | Low-light boost: auto -> on -> off                               |
-| `t`       | Temporal denoise (part of boost) on/off                          |
-| `d`       | Show tracker's search windows                                    |
-| `q` / Esc | Quit                                                             |
+| `s`       | Segment length held between hands: 1 / 2 / 4 / 8 s         |
+| `v`       | Bars <-> mirrored bars                                     |
+| `p`       | Pitch from hand height on/off                              |
+| `e`       | Effects (pinch freeze + roll filters) on/off               |
+| `l`       | Low-light boost: auto -> on -> off                         |
+| `t`       | Temporal denoise (part of boost) on/off                    |
+| `r`       | Start / stop recording what you hear to `recordings/*.wav` |
+| `d`       | Show tracker's search windows                              |
+| `q` / Esc | Quit                                                       |
+
+## Recording, settings, drop-outs
+
+- **Record (`r`, or `--record out.wav`)**: saves exactly what leaves speakers as a stereo 32-bit float
+  WAV in `recordings/`. Audio thread only copies samples into a lock-free ring; a separate thread
+  writes file, so recording can't glitch playback. A red `REC m:ss` badge shows while it runs.
+- **Stereo is kept**: a stereo file plays in stereo (a mono file is centred).
+- **Settings survive restarts**: your calibration (`c`), segment length, pitch, denoise, low-light mode
+  and grid style are saved on quit to `~/.config/audiogesture/settings.ini` (`$XDG_CONFIG_HOME` is honoured).
+  Plain `key = value` lines; bad values are ignored or clamped.
+- **Short drop-outs are bridged**: if tracker loses a hand for less than 0.4 s, grid and audio stay
+  where they were instead of flickering; after that grid hides and next sighting snaps into place.
+
+The roll and pinch features are ratios against the hand's own palm length, so they do not depend on how
+far you are from the camera (measured on a real open hand: pinch ratio 1.47, palm-width ratio 0.69; a pinch
+is below 0.28, an edge-on palm about 0.1). Both are limited by 2-D landmarks: a hand turned *away* from the
+camera looks like a hand turned edge-on, so keep the palm roughly facing the camera when you do not want a filter.
 
 ## Build and run
 
@@ -68,14 +89,17 @@ make test          # unit tests; test_tracker is skipped unless models are downl
 make test-asan     # same under AddressSanitizer + UBSan
 ```
 
-| Test                | Checks                                                                                                                                                                   |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `test_audio_engine` | gain ramp 0->1 gets louder across the segment, -1 is the exact phase inverse of +1, stretch 2 halves the head speed, reverse wraps backwards                             |
-| `test_mapper`       | distance -> stretch, edge heights -> signed gains (rectangle, fist, upside-down, twist), single hand holds values, sweep vs stretch, calibrate, pitch                    |
-| `test_spectrum`     | a sine lands in the right log-spaced bar, silence decays                                                                                                                 |
-| `test_enhancer`     | dark frames get brighter, bright ones untouched, denoise lowers noise without smearing a moving block                                                                    |
-| `test_grid`         | bars stay inside the trapezium / triangle / inverted / twisted quad                                                                                                      |
-| `test_tracker`      | models load on this OpenCV, no phantom hands on black or noise frames; if `tests/data/hand.jpg` exists a real hand must be found |
+| Test                | Checks                                                                                                                                                |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_audio_engine` | gain ramp 0->1 gets louder across segment, -1 is exact phase inverse of +1, stretch 2 halves head speed, reverse wraps backwards; freeze stops the head but not the sound; low-/high-pass remove the right tone |
+| `test_biquad`       | Butterworth low-/high-pass: flat pass band, -3 dB at the cutoff, > 30 dB down 3 octaves away, stable while the cutoff sweeps |
+| `test_mapper`       | distance -> stretch, edge heights -> signed gains (rectangle, fist, upside-down, twist), single hand holds values, sweep vs stretch, calibrate, pitch; pinch with hysteresis, roll -> cutoffs, effects off, no stuck freeze when a hand leaves |
+| `test_spectrum`     | a sine lands in right log-spaced bar, silence decays                                                                                              |
+| `test_enhancer`     | dark frames get brighter, bright ones untouched, denoise lowers noise without smearing a moving block                                                 |
+| `test_grid`         | bars stay inside trapezium / triangle / inverted / twisted quad                                                                                   |
+| `test_recorder`     | recorded WAV equals what engine played, bit for bit; double start/stop and bad paths are safe                                                     |
+| `test_settings`     | save/load round trip, clamping, garbage lines ignored                                                                                                 |
+| `test_tracker`      | models load on this OpenCV, no phantom hands on black or noise frames; if `tests/data/hand.jpg` exists a real hand must be found                      |
 
 ## How tracker works
 
