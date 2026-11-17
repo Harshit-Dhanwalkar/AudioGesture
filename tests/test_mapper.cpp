@@ -20,6 +20,20 @@ Hand mk(float cx, float wristY, float tipY) {
   return h;
 }
 
+// A full skeleton: palm length = 0.4 * (wrist-to-tip height)
+// pinch = thumb-index distance
+// open  = knuckle width, both as ratios of palm length
+Hand skel(float cx, float wristY, float tipY, float pinch, float open, float aspect = 4.f / 3.f) {
+  Hand h = mk(cx, wristY, tipY);
+  const float y9 = wristY + 0.4f * (tipY - wristY), palm = 0.4f * std::fabs(wristY - tipY);
+  h.lm[9] = {cx, y9};
+  h.lm[5] = {cx - 0.5f * open * palm / aspect, y9};
+  h.lm[17] = {cx + 0.5f * open * palm / aspect, y9};
+  h.lm[4] = {cx - 0.5f * pinch * palm / aspect, y9 - 0.01f};
+  h.lm[8] = {cx + 0.5f * pinch * palm / aspect, y9 - 0.01f};
+  return h;
+}
+
 void settle(GestureMapper &m, const HandState &hs, int frames = 90) {
   for (int i = 0; i < frames; ++i) {
     m.update(hs, 1.0 / 30.0);
@@ -31,7 +45,7 @@ int main() {
   HandState hs;
   hs.aspect = 4.f / 3.f;
 
-  // distance -> stretch (apart = slower), proportional to distance
+  // Distance -> Stretch (apart = slower), Proportional to distance
   {
     GestureMapper m;
     hs.left = mk(0.38f, 0.85f, 0.40f);
@@ -47,7 +61,7 @@ int main() {
     CHECK(m.geometry().valid);
   }
 
-  // edge heights -> signed gains: rectangle, triangle (fist), inverted, twist
+  // Edge heights -> Signed gains: rectangle, triangle (fist), inverted, twist
   {
     GestureMapper m;
     hs.left = mk(0.2f, 0.9f, 0.45f);
@@ -56,23 +70,23 @@ int main() {
     CHECK_NEAR(m.params().envL, 1.0, 0.02);
     CHECK_NEAR(m.params().envR, 1.0, 0.02);
 
-    hs.right = mk(0.8f, 0.9f, 0.9f); // fist: no vertical extent
+    hs.right = mk(0.8f, 0.9f, 0.9f); // Fist: no vertical extent
     settle(m, hs);
     CHECK_NEAR(m.params().envR, 0.0, 0.02);
     CHECK(m.params().envL > 0.9f);
 
     hs.left = mk(0.2f, 0.45f, 0.9f);
-    hs.right = mk(0.8f, 0.45f, 0.9f); // upside down
+    hs.right = mk(0.8f, 0.45f, 0.9f); // Upside down
     settle(m, hs);
     CHECK(m.params().envL < -0.9f && m.params().envR < -0.9f);
     CHECK(m.geometry().eL < 0 && m.geometry().eR < 0);
 
-    hs.left = mk(0.2f, 0.9f, 0.45f); // one up, one down: twist
+    hs.left = mk(0.2f, 0.9f, 0.45f); // One up, one down: twist
     settle(m, hs);
     CHECK(m.params().envL > 0.9f && m.params().envR < -0.9f);
   }
 
-  // one hand only: nothing changes, grid hidden
+  // One hand only: nothing changes, grid hidden
   {
     GestureMapper m;
     hs.left = mk(0.3f, 0.9f, 0.45f);
@@ -85,7 +99,7 @@ int main() {
     CHECK(!m.geometry().valid);
   }
 
-  // direction: a fast sideways sweep of both hands latches; pulling apart does not
+  // Direction: a fast sideways sweep of both hands latches; pulling apart does not
   {
     GestureMapper m;
     float lx = 0.5f, rx = 0.8f;
@@ -99,7 +113,7 @@ int main() {
     }
     CHECK(m.params().direction > 0);
 
-    // fast stretch: hands move apart at 0.6 frame widths / s each, centroid still
+    // Fast stretch: hands move apart at 0.6 frame widths / s each, centroid still
     for (int i = 0; i < 12; ++i) {
       lx -= 0.02f;
       rx += 0.02f;
@@ -107,7 +121,7 @@ int main() {
     }
     CHECK(m.params().direction > 0);
 
-    // sweep both hands left at 0.9 frame widths / s -> reverse
+    // Sweep both hands left at 0.9 frame widths / s -> reverse
     for (int i = 0; i < 12; ++i) {
       lx -= 0.03f;
       rx -= 0.03f;
@@ -115,7 +129,7 @@ int main() {
     }
     CHECK(m.params().direction < 0);
 
-    // and back to right -> forward
+    // Back to right -> forward
     for (int i = 0; i < 14; ++i) {
       lx += 0.03f;
       rx += 0.03f;
@@ -124,7 +138,7 @@ int main() {
     CHECK(m.params().direction > 0);
   }
 
-  // calibrate: current pose becomes 1x speed / full amplitude
+  // Calibrate: current pose becomes 1x speed / full amplitude
   {
     GestureMapper m;
     hs.left = mk(0.2f, 0.8f, 0.55f);
@@ -136,7 +150,7 @@ int main() {
     CHECK_NEAR(m.params().envL, 1.0, 0.03);
   }
 
-  // pitch only when enabled; up = higher
+  // Pitch only when enabled; up = higher
   {
     GestureMapper m;
     hs.left = mk(0.3f, 0.5f, 0.1f);
@@ -148,8 +162,8 @@ int main() {
     CHECK(m.params().pitchSemis > 3.f);
   }
 
-  // short drop-out: grid survives it; a long one hides grid and next sighting
-  // snaps to new position instead of gliding from old one
+  // Short drop-out: grid survives it; a long one hides grid and next sighting snaps to new position
+  // instead of gliding from old one
   {
     GestureMapper m;
     hs.left = mk(0.3f, 0.9f, 0.45f);
@@ -173,7 +187,7 @@ int main() {
     CHECK_NEAR(m.geometry().rx, 0.9, 0.01); // snapped, no glide from 0.7
   }
 
-  // settings round-trip through mapper
+  // Settings round-trip through mapper
   {
     GestureMapper m;
     Settings s;
@@ -188,6 +202,50 @@ int main() {
     CHECK_NEAR(out.refHeight, 0.2, 1e-6);
     CHECK_NEAR(out.segSec, 8.0, 1e-6);
     CHECK(out.pitchOn);
+  }
+
+  // Effects: pinch freezes (with hysteresis), palm turned edge-on filters
+  {
+    GestureMapper m;
+    auto both = [&](float pinchL, float openL, float pinchR, float openR) {
+      hs.left = skel(0.25f, 0.9f, 0.45f, pinchL, openL);
+      hs.right = skel(0.75f, 0.9f, 0.45f, pinchR, openR);
+      settle(m, hs, 60);
+    };
+    both(1.2f, 0.7f, 1.2f, 0.7f); // Relaxed open hands: nothing happens
+    CHECK(!m.frozen());
+    CHECK_NEAR(m.lowpassHz(), 20000.0, 50.0);
+    CHECK_NEAR(m.highpassHz(), 20.0, 0.5);
+
+    both(1.2f, 0.7f, 0.1f, 0.7f); // Right pinch
+    CHECK(m.frozen() && m.params().freeze);
+    both(1.2f, 0.7f, 0.35f, 0.7f); // Between thresholds: still pinched
+    CHECK(m.frozen());
+    both(1.2f, 0.7f, 0.6f, 0.7f); // Released
+    CHECK(!m.frozen());
+
+    both(1.2f, 0.12f, 1.2f, 0.12f);           // Both palms edge-on
+    CHECK_NEAR(m.highpassHz(), 1200.0, 30.0); // Left hand -> high-pass up
+    CHECK_NEAR(m.lowpassHz(), 400.0, 10.0);   // Right hand -> low-pass down
+    both(1.2f, 0.7f, 1.2f, 0.7f);
+    CHECK_NEAR(m.lowpassHz(), 20000.0, 50.0);
+
+    // Effects off: bypass even with a pinch and edge-on palms
+    m.effectsOn = false;
+    both(0.1f, 0.12f, 0.1f, 0.12f);
+    CHECK(!m.frozen());
+    CHECK_NEAR(m.lowpassHz(), 20000.0, 1.0);
+    m.effectsOn = true;
+
+    // Pinch with hand then losing it: sound must not stay frozen
+    both(0.1f, 0.7f, 1.2f, 0.7f);
+    CHECK(m.frozen());
+    HandState gone = hs;
+    gone.left = Hand{};
+    for (int i = 0; i < 30; ++i) {
+      m.update(gone, 1.0 / 30.0); // 1 s, past hold time
+    }
+    CHECK(!m.frozen());
   }
 
   TEST_MAIN_END();
