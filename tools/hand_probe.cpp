@@ -6,31 +6,40 @@
 //   hand_probe photo.jpg --crop 0,320,548,525 --dark 0.15 --noise 8 --lowlight
 //   --out dark.png hand_probe clip.mp4 --frames 120 --out last_frame.png
 //
-//   --models DIR     where the .onnx files live (default: search ./models etc.)
-//   --crop x,y,w,h   use only this part of the image
-//   --dark F         multiply brightness by F (0.1 = very dark) to simulate a
-//   dim room
-//   --noise S        add Gaussian sensor noise with std-dev S (0..255 scale)
-//   after darkening
-//   --lowlight       run the LowLightEnhancer (forced on) before tracking
-//   --frames N       process N frames (an image is repeated, which exercises
-//   ROI tracking)
-//   --debug          draw the tracking ROI
-//   --jitter PX      shift the image randomly by up to PX pixels per frame
+//   --models DIR     where .onnx files live (default: search ./models etc.)
+//   --crop x,y,w,h   use only this part of image
+//   --dark F         multiply brightness by F (0.1 = very dark) to simulate a dim room
+//   --noise S        add Gaussian sensor noise with std-dev S (0..255 scale) after darkening
+//   --lowlight       run LowLightEnhancer (forced on) before tracking
+//   --frames N       process N frames (an image is repeated, which exercises ROI tracking)
+//   --debug          draw tracking ROI
+//   --jitter PX      shift image randomly by up to PX pixels per frame
 //                    (a hand that is not perfectly still)
-//   --trials N       cold-start test: N times reset the tracker and enhancer,
-//                    feed up to 15 fresh dark/noisy frames, record how many
-//                    frames it took to find a hand (prints SUMMARY cold ...)
-//   --flip           mirror the image (moves the hand to the other side)
-//   --tmin F         temporal-denoise floor (weight of the newest frame)
-//   --no-scan        disable the scan fallback;  --no-temporal  disable the
-//                    temporal denoise (for A/B comparisons)
+//   --trials N       cold-start test: N times reset tracker and enhancer, feed up to 15 fresh
+//                    dark/noisy frames, record how many frames it took to find a hand (prints
+//                    SUMMARY cold ...)
+//   --flip           mirror image (moves hand to other side)
+//   --tmin F         temporal-denoise floor (weight of newest frame)
+//   --no-scan        disable scan fallback; --no-temporal disable temporal denoise (for A/B
+//                    comparisons)
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <opencv2/core.hpp>
+#include <opencv2/core/base.hpp>
+#include <opencv2/core/hal/interface.h>
+#include <opencv2/core/mat.hpp>
+#include <opencv2/core/matx.hpp>
+#include <opencv2/core/types.hpp>
+#include <opencv2/core/version.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/videoio.hpp>
 #include <string>
 
+#include "audiogesture/vision/GestureTracker.h"
 #include "audiogesture/vision/HandTracker.h"
+#include "audiogesture/vision/LowLightEnhancer.h"
 
 int main(int argc, char **argv) {
   if (argc < 2) {
@@ -53,17 +62,14 @@ int main(int argc, char **argv) {
   double tmin = -1;
   for (int i = 2; i < argc; ++i) {
     const std::string a = argv[i];
-    auto next = [&]() -> const char * {
-      return (i + 1 < argc) ? argv[++i] : "";
-    };
+    auto next = [&]() -> const char * { return (i + 1 < argc) ? argv[++i] : ""; };
 
     if (a == "--out") {
       out = next();
     } else if (a == "--models") {
       models = next();
     } else if (a == "--crop") {
-      std::sscanf(next(), "%d,%d,%d,%d", &crop.x, &crop.y, &crop.width,
-                  &crop.height);
+      std::sscanf(next(), "%d,%d,%d,%d", &crop.x, &crop.y, &crop.width, &crop.height);
     } else if (a == "--dark") {
       dark = std::atof(next());
     } else if (a == "--noise") {
@@ -119,17 +125,17 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "tracker: %s\n", tracker.error().c_str());
     return 2;
   }
-  std::printf("OpenCV %s, landmark model: %s\n", CV_VERSION,
-              tracker.landmarkModelUsed().c_str());
+  std::printf("OpenCV %s, landmark model: %s\n", CV_VERSION, tracker.landmarkModelUsed().c_str());
 
   LowLightEnhancer enh;
-  enh.setMode(lowlight ? LowLightEnhancer::Mode::On
-                       : LowLightEnhancer::Mode::Off);
+  enh.setMode(lowlight ? LowLightEnhancer::Mode::On : LowLightEnhancer::Mode::Off);
   enh.useGamma = enhStages.find("gamma") != std::string::npos;
   enh.useClahe = enhStages.find("clahe") != std::string::npos;
   enh.maxBlurSigma = enhStages.find("blur") != std::string::npos ? 2.2f : 0.f;
   enh.useTemporal = !noTemporal;
-  if (tmin > 0) enh.temporalMin = float(tmin);
+  if (tmin > 0) {
+    enh.temporalMin = float(tmin);
+  }
   cv::RNG rng(1234);
 
   // One test frame: crop, jitter, darken, add sensor noise
@@ -143,8 +149,7 @@ int main(int argc, char **argv) {
     if (jitter > 0) {
       const cv::Matx23f M(1, 0, float(rng.uniform(-jitter, jitter)), 0, 1,
                           float(rng.uniform(-jitter, jitter)));
-      cv::warpAffine(frame, frame, M, frame.size(), cv::INTER_LINEAR,
-                     cv::BORDER_REPLICATE);
+      cv::warpAffine(frame, frame, M, frame.size(), cv::INTER_LINEAR, cv::BORDER_REPLICATE);
     }
     if (dark != 1.0) {
       frame.convertTo(frame, -1, dark, 0);
@@ -156,6 +161,7 @@ int main(int argc, char **argv) {
       f16 += n;
       f16.convertTo(frame, CV_8UC3);
     }
+
     return frame;
   };
 
@@ -164,12 +170,16 @@ int main(int argc, char **argv) {
       std::fprintf(stderr, "--trials needs a still image\n");
       return 1;
     }
+
     int ok = 0;
     double latency = 0;
     for (int t = 0; t < trials; ++t) {
       tracker.reset();
-      LowLightEnhancer e = enh; // same settings, fresh history
+
+      LowLightEnhancer e; // Same settings, fresh history
+      e.copySettingsFrom(enh);
       e.setMode(lowlight ? LowLightEnhancer::Mode::On : LowLightEnhancer::Mode::Off);
+
       HandState h;
       for (int f = 0; f < 15; ++f) {
         const cv::Mat &proc = e.apply(degrade(still));
@@ -183,12 +193,15 @@ int main(int argc, char **argv) {
     }
     std::printf("SUMMARY cold success=%d/%d meanFramesToFind=%.1f\n", ok, trials,
                 ok ? latency / ok : 0.0);
+
     return 0;
   }
 
   cv::Mat view;
   HandState hs;
-  int bothFrames = 0, anyFrames = 0, total = 0;
+  int bothFrames, = 0;
+  int anyFrames = 0;
+  int total = 0;
   double scoreSum = 0;
   int scoreN = 0;
   for (int f = 0; f < frames; ++f) {
@@ -200,11 +213,9 @@ int main(int argc, char **argv) {
 
     const cv::Mat &proc = enh.apply(frame);
     tracker.process(proc, 1.0 / 30.0, hs);
-    std::printf(
-        "frame %d: luma %.0f%s  palm %.1f ms  landmarks %.1f ms | L:%s R:%s", f,
-        cv::mean(cv::Mat(frame))[0], lowlight ? "(enh)" : "", tracker.palmMs(),
-        tracker.landmarkMs(), hs.left.valid ? "yes" : "no",
-        hs.right.valid ? "yes" : "no");
+    std::printf("frame %d: luma %.0f%s  palm %.1f ms  landmarks %.1f ms | L:%s R:%s", f,
+                cv::mean(cv::Mat(frame))[0], lowlight ? "(enh)" : "", tracker.palmMs(),
+                tracker.landmarkMs(), hs.left.valid ? "yes" : "no", hs.right.valid ? "yes" : "no");
     for (const Hand *h : {&hs.left, &hs.right}) {
       if (h->valid) {
         std::printf("  [score %.2f palm (%.2f,%.2f)]", h->score, h->x, h->y);
@@ -231,8 +242,8 @@ int main(int argc, char **argv) {
   drawHands(view, hs, debug);
   cv::imwrite(out, view);
   std::printf("wrote %s (%dx%d)\n", out.c_str(), view.cols, view.rows);
-  std::printf("SUMMARY both=%d any=%d of %d meanScore=%.2f\n", bothFrames,
-              anyFrames, total, scoreN ? scoreSum / scoreN : 0.0);
+  std::printf("SUMMARY both=%d any=%d of %d meanScore=%.2f\n", bothFrames, anyFrames, total,
+              scoreN ? scoreSum / scoreN : 0.0);
 
-  return (hs.left.valid || hs.right.valid) ? 0 : 3; // exit 3 = no hand found
+  return (hs.left.valid || hs.right.valid) ? 0 : 3; // Exit 3 = no hand found
 }
