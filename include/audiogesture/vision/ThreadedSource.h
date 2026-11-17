@@ -16,6 +16,7 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <opencv2/core/mat.hpp>
 #include <thread>
 #include <utility>
 
@@ -57,6 +58,7 @@ public:
     }
 
     out = pubState_;
+
     return true;
   }
 

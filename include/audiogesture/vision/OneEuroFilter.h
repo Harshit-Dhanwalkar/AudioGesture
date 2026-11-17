@@ -14,7 +14,7 @@
 //
 //     \tau   = 1 / (2 * \pi * cutoff)
 //     \alpha = 1 / (1 + \tau/dt)       (dt = time since last sample)
-//     y    += \alpha * (x - y)
+//     y     += \alpha * (x - y)
 //
 // Tune in units of signal: feed it pixel coordinates, so \beta is "extra Hz of
 // cutoff per pixel/second of speed"
@@ -24,8 +24,7 @@
 
 class OneEuroFilter {
 public:
-  OneEuroFilter(float minCutoffHz = 1.5f, float beta = 0.02f,
-                float derivCutoffHz = 1.0f)
+  OneEuroFilter(float minCutoffHz = 1.5f, float beta = 0.02f, float derivCutoffHz = 1.0f)
       : minCutoff_(minCutoffHz), beta_(beta), dCutoff_(derivCutoffHz) {}
 
   void reset() { init_ = false; }
@@ -36,11 +35,11 @@ public:
       init_ = true;
       xHat_ = x;
       dxHat_ = 0.f;
+
       return x;
     }
 
-    // Speed estimate, itself low-passed so a single noisy sample can't open
-    // filter
+    // Speed estimate, itself low-passed so a single noisy sample can't open filter
     const float dx = (x - xHat_) / dt;
     dxHat_ += alpha(dCutoff_, dt) * (dx - dxHat_);
 
@@ -52,10 +51,15 @@ public:
 private:
   static float alpha(float cutoffHz, float dt) {
     const float tau = 1.f / (6.2831853f * cutoffHz);
+
     return 1.f / (1.f + tau / dt);
   }
 
-  float minCutoff_, beta_, dCutoff_;
-  float xHat_ = 0.f, dxHat_ = 0.f;
+  float minCutoff_;
+  float beta_;
+  float dCutoff_;
+
+  float xHat_ = 0.f;
+  float dxHat_ = 0.f;
   bool init_ = false;
 };
