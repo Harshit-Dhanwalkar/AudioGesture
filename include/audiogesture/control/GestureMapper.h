@@ -29,7 +29,6 @@ public:
   float refHeight = 0.45f;  // hand extent (frame heights) = full amplitude
   float segSec = 4.0f;      // seconds of audio held between the hands
   bool pitchOn = false;
-  bool effectsOn = true; // pinch freeze + roll filters
 
   // Returns the parameters to hand to AudioEngine::setParams()
   const EngineParams &update(const HandState &hs, double dt);
@@ -41,21 +40,13 @@ public:
   // not make grid (and its audio) flicker
   static constexpr float kHoldSec = 0.4f;
 
-  // Effects state (valid after update()). Pinch thumb to index on either hand =
-  // freeze. Left hand palm turning edge-on = high-pass up, right hand = low-pass down.
-  bool frozen() const { return p_.freeze; }
-  float lowpassHz() const { return p_.lpHz; }
-  float highpassHz() const { return p_.hpHz; }
-
   void applySettings(const Settings &st) {
-    effectsOn = st.effects;
     restLength = st.restLength;
     refHeight = st.refHeight;
     segSec = st.segSec;
     pitchOn = st.pitchOn;
   }
   void storeSettings(Settings &st) const {
-    st.effects = effectsOn;
     st.restLength = restLength;
     st.refHeight = refHeight;
     st.segSec = segSec;
@@ -79,9 +70,6 @@ private:
   };
 
   static void track(Smoothed &s, const Hand &h, float a);
-  // Pinch / palm-openness features of one skeleton hand (see update())
-  static void features(const Hand &h, float aspect, float a, bool &pinched, float &open);
-  void applyEffects();
   static float gainFromExtent(float r);
 
   EngineParams p_;
@@ -92,8 +80,6 @@ private:
   float vc_ = 0.f;
   float vs_ = 0.f;
   bool cInit_ = false;
-  bool pinchL_ = false, pinchR_ = false;
-  float openL_ = 1.f, openR_ = 1.f; // 1 = palm facing the camera, 0 = edge-on
   float missL_ = 1e3f;
   float missR_ = 1e3f; // seconds since each hand was last seen
 };

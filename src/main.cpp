@@ -44,7 +44,7 @@ void usage(const char *exe) {
       "[--models DIR] [--skin] [--snapshot out.png] [--record out.wav]\n"
       "  keys: l low-light boost (auto/on/off)   "
       "v bars/mirrored   d show tracking ROI   c calibrate pose\n"
-      "  p pitch on/off   e effects on/off   s segment length   t temporal denoise   r record WAV   q/Esc quit\n",
+      "  p pitch on/off   s segment length   t temporal denoise   r record WAV   q/Esc quit\n",
       exe);
 }
 
@@ -254,7 +254,7 @@ int main(int argc, char **argv) {
       drawHands(view, hands, debugRoi);
     }
     grid.draw(view, mapper.geometry(), analyzer.bars(), analyzer.peaks(), audio.segmentPhase(),
-              mapper.params().direction, mapper.frozen());
+              mapper.params().direction);
     drawHud(view, mapper, hands, dnn, fps);
     if (audio.recording()) {
       drawRecBadge(view, audio.recordedSeconds(), audio.recordDropped());
@@ -299,9 +299,6 @@ int main(int argc, char **argv) {
     }
     if (k == 'p') {
       mapper.togglePitch();
-    }
-    if (k == 'e') {
-      mapper.effectsOn = !mapper.effectsOn; // pinch freeze + roll filters
     }
     if (k == 's') {
       mapper.cycleSegment();

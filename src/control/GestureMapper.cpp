@@ -35,45 +35,6 @@ void GestureMapper::track(Smoothed &s, const Hand &h, float a) {
   s.e += a * (e - s.e);
 }
 
-// Both features are ratios against the hand's own palm length (wrist -> middle
-// knuckle), so they do not change with how far the hand is from the camera.
-//
-//  pinch = |thumb tip - index tip| / palm length. A relaxed open hand is ~1+,
-//          touching fingertips ~0.1. Schmitt trigger: on below 0.28, off above 0.45.
-//  open  = |index knuckle - pinky knuckle| / palm length, i.e. the apparent palm
-//          width. Palm facing the camera ~0.7 (measured on a real open hand: 0.69),
-//          turned edge-on ~0.1 (it is cos(roll) for a flat hand). 0.12..0.50 is
-//          mapped to 0..1, so a normal open hand, even a bit angled, reads exactly 1
-//          and nothing is filtered.
-void GestureMapper::features(const Hand &h, float aspect, float a, bool &pinched, float &open) {
-  if (!h.valid || !h.hasSkeleton) {
-    return;
-  }
-  auto d = [&](int i, int j) {
-    return std::hypot((h.lm[i].x - h.lm[j].x) * aspect, h.lm[i].y - h.lm[j].y);
-  };
-  const float palm = std::max(d(0, 9), 1e-4f);
-  const float pinch = d(4, 8) / palm;
-  pinched = pinched ? pinch < 0.45f : pinch < 0.28f;
-  const float o = std::clamp((d(5, 17) / palm - 0.12f) / (0.50f - 0.12f), 0.f, 1.f);
-  open += a * (o - open);
-}
-
-// Engine parameters from the effect state. Left hand: high-pass 20 Hz -> 1.2 kHz as
-// the palm turns edge-on. Right hand: low-pass 20 kHz -> 400 Hz. Log-spaced, because
-// pitch perception is.
-void GestureMapper::applyEffects() {
-  if (!effectsOn) {
-    p_.freeze = false;
-    p_.lpHz = 20000.f;
-    p_.hpHz = 20.f;
-    return;
-  }
-  p_.freeze = pinchL_ || pinchR_;
-  p_.hpHz = 20.f * std::pow(60.f, 1.f - openL_);
-  p_.lpHz = 400.f * std::pow(50.f, openR_);
-}
-
 const EngineParams &GestureMapper::update(const HandState &hs, double dt) {
   dt = std::max(dt, 1e-4);
   // EMA smoothing, frame-rate independent: \alpha = 1 - \exp(-dt/\tau)
@@ -96,16 +57,7 @@ const EngineParams &GestureMapper::update(const HandState &hs, double dt) {
   }
 
   const bool both = L_.init && R_.init;
-  if (!L_.init) {
-    pinchL_ = false; // a hand that is gone cannot keep the sound frozen or filtered
-    openL_ = 1.f;
-  }
-  if (!R_.init) {
-    pinchR_ = false;
-    openR_ = 1.f;
-  }
   if (!both) {
-    applyEffects();
     // Hold last parameters while a hand is missing
     cInit_ = false;
     geo_.valid = false;
@@ -127,10 +79,6 @@ const EngineParams &GestureMapper::update(const HandState &hs, double dt) {
   p_.envR = gainFromExtent(R_.e / refHeight);
   p_.gain = 0.8f;
   p_.segSec = segSec;
-
-  features(hs.left, hs.aspect, a, pinchL_, openL_);
-  features(hs.right, hs.aspect, a, pinchR_, openR_);
-  applyEffects();
 
   if (pitchOn) {
     const float yMean = 0.5f * (L_.y + R_.y);
@@ -184,17 +132,5 @@ std::string GestureMapper::status() const {
                 "speed %.2fx | L %+.2f R %+.2f | seg %.0fs | pitch %s%+.0fst | dir %+.0f",
                 1.f / p_.stretch, p_.envL, p_.envR, segSec, pitchOn ? "" : "(off) ", p_.pitchSemis,
                 p_.direction);
-  std::string out = buf;
-  if (p_.freeze) {
-    out += " | FREEZE";
-  }
-  if (p_.lpHz < 15000.f) {
-    std::snprintf(buf, sizeof buf, " | LP %.1fk", p_.lpHz / 1000.f);
-    out += buf;
-  }
-  if (p_.hpHz > 30.f) {
-    std::snprintf(buf, sizeof buf, " | HP %.0f", p_.hpHz);
-    out += buf;
-  }
-  return out;
+  return buf;
 }
