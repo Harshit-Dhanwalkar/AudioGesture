@@ -26,7 +26,7 @@ cv::Scalar heightColour(float t) {
 
 void SpectrumGrid::draw(cv::Mat &img, const RigGeometry &g,
                         const std::vector<float> &bars, const std::vector<float> &peaks,
-                        float playhead, float dirSign, bool frozen) const {
+                        float playhead, float dirSign) const {
   if (!g.valid || bars.empty()) {
     return;
   }
@@ -125,16 +125,8 @@ void SpectrumGrid::draw(cv::Mat &img, const RigGeometry &g,
   // 5. playhead + travel direction
   const float u = std::clamp(playhead, 0.f, 1.f);
   cv::line(img, pt(G(u, 0)), pt(G(u, 1)), {0, 0, 0}, 4, cv::LINE_AA);
-  // Frozen: cyan playhead, no travel arrow (the head is not moving), and a label
-  const cv::Scalar headCol = frozen ? cv::Scalar(255, 220, 0) : cv::Scalar(255, 255, 255);
-  cv::line(img, pt(G(u, 0)), pt(G(u, 1)), headCol, 2, cv::LINE_AA);
-  if (frozen) {
-    const cv::Point at = pt(P(0.5f) - cv::Point2f(34.f, 0.f));
-    cv::putText(img, "FREEZE", at, cv::FONT_HERSHEY_SIMPLEX, 0.6, {0, 0, 0}, 4, cv::LINE_AA);
-    cv::putText(img, "FREEZE", at, cv::FONT_HERSHEY_SIMPLEX, 0.6, headCol, 1, cv::LINE_AA);
-  } else {
-    const cv::Point2f dir = (R - L) * (dirSign >= 0 ? 1.f : -1.f) / len;
-    cv::arrowedLine(img, pt(P(u)), pt(P(u) + dir * 18.f), {255, 255, 255}, 2, cv::LINE_AA, 0,
-                    0.5);
-  }
+  cv::line(img, pt(G(u, 0)), pt(G(u, 1)), {255, 255, 255}, 2, cv::LINE_AA);
+  const cv::Point2f dir = (R - L) * (dirSign >= 0 ? 1.f : -1.f) / len;
+  cv::arrowedLine(img, pt(P(u)), pt(P(u) + dir * 18.f), {255, 255, 255}, 2, cv::LINE_AA, 0,
+                  0.5);
 }

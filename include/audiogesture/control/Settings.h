@@ -14,7 +14,6 @@ struct Settings {
   float refHeight = 0.45f;  // hand extent (frame heights) that means full amplitude
   float segSec = 4.0f;      // seconds of audio held between the hands
   bool pitchOn = false;
-  bool effects = true;      // pinch freeze + roll filters
   bool temporalDenoise = true;
   int boostMode = 0; // low-light boost: 0 auto, 1 on, 2 off
   int gridStyle = 0; // 0 bars, 1 mirrored
