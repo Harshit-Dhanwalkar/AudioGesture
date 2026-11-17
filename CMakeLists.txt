@@ -23,6 +23,8 @@ add_library(audiogesture_core STATIC
   src/audio/SpectrumAnalyzer.cpp
   src/control/GestureMapper.cpp
   src/control/Settings.cpp
+  src/ui/FilePicker.cpp
+  src/ui/Onboarding.cpp
   src/ui/SpectrumGrid.cpp
   src/vision/HandTracker.cpp
   src/vision/SkinHandTracker.cpp)
@@ -46,7 +48,7 @@ target_link_libraries(hand_probe PRIVATE audiogesture_core)
 # Tests: `make test`  (= cmake --build build && ctest --test-dir build)
 if(AUDIOGESTURE_BUILD_TESTS)
   enable_testing()
-  set(AG_TESTS test_audio_engine test_biquad test_recorder test_settings test_mapper test_spectrum test_enhancer test_grid test_handedness test_threaded test_tracker)
+  set(AG_TESTS test_audio_engine test_biquad test_recorder test_settings test_mapper test_spectrum test_enhancer test_grid test_handedness test_onboarding test_threaded test_tracker)
   foreach(t ${AG_TESTS})
     add_executable(${t} tests/${t}.cpp)
     target_link_libraries(${t} PRIVATE audiogesture_core)
@@ -54,6 +56,6 @@ if(AUDIOGESTURE_BUILD_TESTS)
     add_test(NAME ${t} COMMAND ${t} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endforeach()
   # test_tracker needs the ONNX models (`make models`); it reports SKIP (exit 77)
-  # when they are absent, which ctest shows as skipped, not failed.
+  # when they are absent, which ctest shows as skipped, not failed
   set_tests_properties(test_tracker PROPERTIES SKIP_RETURN_CODE 77 LABELS models)
 endif()

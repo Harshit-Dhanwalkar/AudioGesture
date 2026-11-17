@@ -39,7 +39,8 @@ There is no decorative waveform: every pixel is either grid or measured audio (s
 
 | Key       | Action                                                     |
 | --------- | ---------------------------------------------------------- |
-| `c`       | Calibrate: pose holded becomes 1x speed and full amplitude |
+| `c`       | Calibrate: hold both hands in your comfortable pose for 3 s (count restarts if a hand is lost); that pose becomes 1x speed and full amplitude. Press again to cancel |
+| `h` / `?` | Help overlay (gestures and keys). Opens by itself until you have calibrated once |
 | `s`       | Segment length held between hands: 1 / 2 / 4 / 8 s         |
 | `v`       | Bars <-> mirrored bars                                     |
 | `p`       | Pitch from hand height on/off                              |
@@ -107,6 +108,7 @@ make test-asan     # same under AddressSanitizer + UBSan
 | `test_spectrum`     | a sine lands in right log-spaced bar, silence decays                                                                                                  |
 | `test_enhancer`     | dark frames get brighter, bright ones untouched, denoise lowers noise without smearing a moving block                                                 |
 | `test_handedness`   | learns the model's polarity from separated hands (both conventions), settles crossed hands and a lone hand on the far side, ignores unsure or contradictory votes |
+| `test_onboarding`   | calibration countdown (needs both hands, restarts, fires once), help text covers every key, overlays draw and survive tiny frames, file picker order zenity -> kdialog -> none |
 | `test_threaded`     | newest-wins hand-over between tracking and UI threads, frame/state stay paired, end of stream, clean shutdown (also run under TSan in CI) |
 | `test_grid`         | bars stay inside trapezium / triangle / inverted / twisted quad                                                                                       |
 | `test_recorder`     | recorded WAV equals what engine played, bit for bit; double start/stop and bad paths are safe                                                         |
@@ -138,8 +140,9 @@ a One-Euro filter smooths joints. Left/right is by screen position in mirrored v
 
 ```sh
 HAND_DEBUG=1 build/audiogesture file.wav 2>&1 | grep -E '\[palm\]|\[lm\]|\[scan\]'
-build/hand_probe photo.jpg --dark 0.15 --noise 6 --lowlight --out dark.png     # simulate a dim room
+build/hand_probe photo.jpg --dark 0.15 --noise 6 --lowlight --out dark.png          # simulate a dim room
 build/hand_probe photo.jpg --dark 0.1 --noise 7 --lowlight --jitter 3 --trials 30   # cold-start success rate
+build/audiogesture                                        # no file given: a file dialog (zenity/kdialog) opens
 build/audiogesture file.wav clip.mp4 --snapshot out.png   # headless: save composed view after 40 frames
 ```
 

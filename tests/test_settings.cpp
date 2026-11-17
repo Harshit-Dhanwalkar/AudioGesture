@@ -12,7 +12,7 @@ int main() {
   const std::string path = (dir / "sub" / "settings.ini").string();
 
   Settings missing;
-  CHECK(!missing.load(path)); // no file: false, defaults kept
+  CHECK(!missing.load(path)); // No file: false, defaults kept
   CHECK_NEAR(missing.restLength, 0.45, 1e-6);
 
   Settings a;
@@ -23,7 +23,9 @@ int main() {
   a.temporalDenoise = false;
   a.boostMode = 2;
   a.gridStyle = 1;
-  CHECK(a.save(path)); // creates directory too
+  a.calibrated = true;
+  a.effects = false;
+  CHECK(a.save(path)); // Creates directory too
 
   Settings b;
   CHECK(b.load(path));
@@ -31,6 +33,8 @@ int main() {
   CHECK_NEAR(b.refHeight, 0.33, 1e-4);
   CHECK_NEAR(b.segSec, 2.0, 1e-6);
   CHECK(b.pitchOn && !b.temporalDenoise && b.boostMode == 2 && b.gridStyle == 1);
+  CHECK(b.calibrated && !b.effects);
+  CHECK(!Settings{}.calibrated); // A fresh install has not calibrated
 
   // Hand-edited nonsense: ignored or clamped, never fatal
   {
@@ -40,11 +44,11 @@ int main() {
   }
   Settings c;
   CHECK(c.load(path));
-  CHECK_NEAR(c.restLength, 1.2, 1e-6); // clamped to maximum
-  CHECK_NEAR(c.refHeight, 0.45, 1e-6); // unparsable: default kept
-  CHECK_NEAR(c.segSec, 1.0, 1e-6);     // clamped to minimum
-  CHECK(c.boostMode == 2);             // clamped
-  CHECK(!c.pitchOn);                   // unparsable: default kept
+  CHECK_NEAR(c.restLength, 1.2, 1e-6); // Clamped to maximum
+  CHECK_NEAR(c.refHeight, 0.45, 1e-6); // Unparsable: default kept
+  CHECK_NEAR(c.segSec, 1.0, 1e-6);     // Clamped to minimum
+  CHECK(c.boostMode == 2);             // Clamped
+  CHECK(!c.pitchOn);                   // Unparsable: default kept
 
   CHECK(!Settings::defaultPath().empty());
   fs::remove_all(dir);
