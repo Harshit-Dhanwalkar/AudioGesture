@@ -101,6 +101,8 @@ bool Settings::load(const std::string &path) {
       parseFloat(v, segSec);
     } else if (k == "pitch") {
       parseBool(v, pitchOn);
+    } else if (k == "calibrated") {
+      parseBool(v, calibrated);
     } else if (k == "effects") {
       parseBool(v, effects);
     } else if (k == "temporal_denoise") {
@@ -134,6 +136,7 @@ bool Settings::save(const std::string &path) const {
       << "ref_height = " << refHeight << "   # hand height, in frame heights, for full volume\n"
       << "segment_seconds = " << segSec << "\n"
       << "pitch = " << (pitchOn ? "on" : "off") << "\n"
+      << "calibrated = " << (calibrated ? "on" : "off") << "\n"
       << "effects = " << (effects ? "on" : "off") << "   # pinch freeze + roll filters\n"
       << "temporal_denoise = " << (temporalDenoise ? "on" : "off") << "\n"
       << "low_light_boost = " << boostMode << "   # 0 auto, 1 on, 2 off\n"

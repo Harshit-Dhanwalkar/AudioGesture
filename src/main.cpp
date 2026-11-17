@@ -21,6 +21,8 @@
 #include "audiogesture/audio/SpectrumAnalyzer.h"
 #include "audiogesture/control/GestureMapper.h"
 #include "audiogesture/control/Settings.h"
+#include "audiogesture/ui/FilePicker.h"
+#include "audiogesture/ui/Onboarding.h"
 #include "audiogesture/ui/SpectrumGrid.h"
 #include "audiogesture/vision/GestureTracker.h"
 #include "audiogesture/vision/HandTracker.h"
@@ -41,12 +43,12 @@ struct Args {
 
 void usage(const char *exe) {
   std::fprintf(stderr,
-               "usage: %s <audio.wav|flac|ogg|mp3> [camera_index | video_file] "
+               "usage: %s [audio.wav|flac|ogg|mp3] [camera_index | video_file] "
                "[--models DIR] [--skin] [--sync] [--snapshot out.png] [--record out.wav]\n"
                "  keys: l low-light boost (auto/on/off)   v bars/mirrored   d show tracking ROI"
                "   c calibrate pose\n"
-               "  p pitch on/off   e effects on/off   s segment length   t temporal denoise"
-               "   r record WAV   q/Esc quit\n",
+               "  h help   p pitch on/off   e effects on/off   s segment length   t temporal "
+               "denoise   r record WAV   q/Esc quit\n",
                exe);
 }
 
@@ -82,7 +84,7 @@ bool parseArgs(int argc, char **argv, Args &a) {
     }
   }
 
-  return !a.audio.empty();
+  return true; // A missing audio file is handled in main(): file dialog, else usage
 }
 
 void outlined(cv::Mat &img, const std::string &text, cv::Point at, double scale,
@@ -139,6 +141,16 @@ void drawRecBadge(cv::Mat &view, double seconds, size_t dropped) {
 int main(int argc, char **argv) {
   Args args;
   if (!parseArgs(argc, argv, args)) {
+    usage(argv[0]);
+    return 1;
+  }
+
+  // No file given: ask with desktop's dialog (zenity/kdialog) when there is a display
+  if (args.audio.empty() && args.snapshot.empty() &&
+      (std::getenv("DISPLAY") || std::getenv("WAYLAND_DISPLAY"))) {
+    args.audio = pickAudioFile();
+  }
+  if (args.audio.empty()) {
     usage(argv[0]);
     return 1;
   }
@@ -218,6 +230,7 @@ int main(int argc, char **argv) {
   Settings st;
   st.load(settingsPath);
   mapper.applySettings(st);
+  bool calibrated = st.calibrated;
   if (st.gridStyle == 1) {
     grid.cycleStyle();
   }
@@ -230,6 +243,7 @@ int main(int argc, char **argv) {
 
   auto saveSettings = [&] {
     mapper.storeSettings(st);
+    st.calibrated = calibrated;
     st.gridStyle = grid.style() == SpectrumGrid::Style::Mirrored ? 1 : 0;
     if (dnn) {
       st.temporalDenoise = dnn->enhancer().useTemporal;
@@ -244,6 +258,8 @@ int main(int argc, char **argv) {
   HandState hands;
   bool debugRoi = false;
   double fps = 0;
+  bool showHelp = !calibrated; // First run opens cheat-sheet; any later run starts clean
+  CalibrationCountdown countdown;
   int frameNo = 0;
   auto last = std::chrono::steady_clock::now();
 
@@ -273,6 +289,20 @@ int main(int argc, char **argv) {
     grid.draw(view, mapper.geometry(), analyzer.bars(), analyzer.peaks(), audio.segmentPhase(),
               mapper.params().direction, mapper.frozen());
     drawHud(view, mapper, hands, dnn, fps);
+    const bool bothHands = hands.left.valid && hands.right.valid;
+    if (countdown.update(dt, bothHands)) {
+      mapper.calibrate(hands); // Held pose = 1x speed, full amplitude
+      calibrated = true;
+      showHelp = false;
+      saveSettings();
+    }
+    drawCountdown(view, countdown, bothHands);
+    if (!calibrated && !showHelp && !countdown.active()) {
+      drawFirstRunHint(view);
+    }
+    if (showHelp) {
+      drawHelp(view);
+    }
     if (audio.recording()) {
       drawRecBadge(view, audio.recordedSeconds(), audio.recordDropped());
     }
@@ -282,7 +312,7 @@ int main(int argc, char **argv) {
         cv::imwrite(args.snapshot, view);
         break;
       }
-      continue; // no window needed
+      continue; // No window needed
     }
 
     cv::imshow("audiogesture", view);
@@ -300,8 +330,11 @@ int main(int argc, char **argv) {
       debugRoi = !debugRoi;
     }
     if (k == 'c') {
-      mapper.calibrate(hands); // Current pose = 1x speed, full amplitude
-      saveSettings();          // ...and remember it for next time
+      countdown.active() ? countdown.cancel() : countdown.start(); // Hold pose 3 s
+      showHelp = false;
+    }
+    if (k == 'h' || k == '?') {
+      showHelp = !showHelp;
     }
     if (k == 'r') {
       if (audio.recording()) {
@@ -334,7 +367,7 @@ int main(int argc, char **argv) {
   audio.stopRecording();
   audio.stop();
   if (args.snapshot.empty()) {
-    saveSettings(); // headless smoke runs must not overwrite your settings
+    saveSettings(); // Headless smoke runs must not overwrite your settings
   }
 
   return 0;
