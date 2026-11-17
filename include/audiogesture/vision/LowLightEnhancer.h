@@ -19,6 +19,10 @@
 #include <atomic>
 #include <cmath>
 #include <opencv2/core.hpp>
+#include <opencv2/core/cvstd_wrapper.hpp>
+#include <opencv2/core/hal/interface.h>
+#include <opencv2/core/mat.hpp>
+#include <opencv2/core/types.hpp>
 #include <opencv2/imgproc.hpp>
 #include <vector>
 
@@ -42,10 +46,22 @@ public:
     const Mode m = mode_;
     mode_ = (m == Mode::Auto) ? Mode::On : (m == Mode::On) ? Mode::Off : Mode::Auto;
   }
+
+  // Copy configuration from `o` into a fresh enhancer
+  void copySettingsFrom(const LowLightEnhancer &o) {
+    useGamma = o.useGamma;
+    useClahe = o.useClahe;
+    useTemporal.store(o.useTemporal.load());
+    temporalMin = o.temporalMin;
+    temporalT = o.temporalT;
+    maxBlurSigma = o.maxBlurSigma;
+    mode_.store(o.mode_.load());
+  }
   bool active() const { return active_; }
   float meanLuma() const { return meanLuma_; } // 0..255, smoothed
   const char *modeName() const {
     const Mode m = mode_;
+
     return m == Mode::Auto ? "auto" : m == Mode::On ? "on" : "off";
   }
 
