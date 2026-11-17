@@ -25,26 +25,28 @@
 #include "audiogesture/vision/GestureTracker.h"
 #include "audiogesture/vision/HandTracker.h"
 #include "audiogesture/vision/LowLightEnhancer.h"
+#include "audiogesture/vision/ThreadedSource.h"
 
 namespace {
 
 struct Args {
   std::string audio;
-  std::string source = "0"; // camera index, or a video file (handy for testing without a webcam)
+  std::string source = "0"; // Camera index, or a video file (handy for testing without a webcam)
   std::string modelsDir;
-  bool skin = false;    // force old skin-colour tracker
-  std::string record;   // start recording to this WAV immediately (also: key r)
-  std::string snapshot; // headless smoke test: save view after ~40 frames and exit
+  bool skin = false;    // Force old skin-colour tracker
+  bool sync = false;    // Track on UI thread (debugging) instead of a worker thread
+  std::string record;   // Start recording to this WAV immediately (also: key r)
+  std::string snapshot; // Headless smoke test: save view after ~40 frames and exit
 };
 
 void usage(const char *exe) {
   std::fprintf(stderr,
                "usage: %s <audio.wav|flac|ogg|mp3> [camera_index | video_file] "
-               "[--models DIR] [--skin] [--snapshot out.png] [--record out.wav]\n"
-               "  keys: l low-light boost (auto/on/off)   "
-               "v bars/mirrored   d show tracking ROI   c calibrate pose\n"
-               "  p pitch on/off   e effects on/off   s segment length   t temporal denoise   r "
-               "record WAV   q/Esc quit\n",
+               "[--models DIR] [--skin] [--sync] [--snapshot out.png] [--record out.wav]\n"
+               "  keys: l low-light boost (auto/on/off)   v bars/mirrored   d show tracking ROI"
+               "   c calibrate pose\n"
+               "  p pitch on/off   e effects on/off   s segment length   t temporal denoise"
+               "   r record WAV   q/Esc quit\n",
                exe);
 }
 
@@ -59,6 +61,8 @@ bool parseArgs(int argc, char **argv, Args &a) {
     const std::string s = argv[i];
     if (s == "--skin") {
       a.skin = true;
+    } else if (s == "--sync") {
+      a.sync = true;
     } else if (s == "--record" && i + 1 < argc) {
       a.record = argv[++i];
     } else if (s == "--snapshot" && i + 1 < argc) {
@@ -92,12 +96,13 @@ void drawHud(cv::Mat &view, const GestureMapper &mapper, const HandState &hands,
   outlined(view, mapper.status(), {10, 24}, 0.5, {255, 255, 255});
   char status[200];
   if (dnn) {
-    const LowLightEnhancer &e = dnn->enhancer();
+    const CameraHandSource::Stats e = dnn->stats(); // Snapshot from tracking thread
     std::snprintf(status, sizeof status,
-                  "%.0f fps | light %.0f/255, boost %s (%s)%s | palm %.0f ms, landmarks %.0f ms%s",
-                  fps, e.meanLuma(), e.active() ? "ON" : "off", e.modeName(),
-                  e.active() && e.useTemporal ? " +denoise" : "", dnn->tracker().palmMs(),
-                  dnn->tracker().landmarkMs(), dnn->tracker().scanMs() > 0 ? ", scan" : "");
+                  "%.0f fps (tracking %.0f) | light %.0f/255, boost %s (%s)%s | palm %.0f ms, "
+                  "landmarks %.0f ms%s",
+                  fps, e.fps, e.luma, e.boostActive ? "ON" : "off", e.mode,
+                  e.boostActive && e.temporal ? " +denoise" : "", e.palmMs, e.landmarkMs,
+                  e.scanMs > 0 ? ", scan" : "");
   } else {
     std::snprintf(status, sizeof status,
                   "%.0f fps | skin-colour tracker (run `make models` for skeleton tracker)", fps);
@@ -139,13 +144,13 @@ int main(int argc, char **argv) {
   }
 
   AudioEngine audio;
-  if (!audio.load(args.audio))
+  if (!audio.load(args.audio)) {
     return 1;
+  }
 
-  // Hand source: landmark tracker if models are there, else skin-colour
-  // fallback
+  // Hand source: landmark tracker if models are there, else skin-colour fallback
   std::unique_ptr<IHandSource> src;
-  CameraHandSource *dnn = nullptr; // non-null when landmark tracker is in use
+  CameraHandSource *dnn = nullptr; // Non-null when landmark tracker is in use
   const bool fromFile = !isNumber(args.source);
   if (!args.skin) {
     const std::string dir = findModelsDir(args.modelsDir);
@@ -188,6 +193,12 @@ int main(int argc, char **argv) {
     src = std::move(skin);
   }
 
+  // Camera + neural nets on a worker thread so UI/audio control never waits for them
+  // (dnn stays valid: wrapper owns source, keep a pointer)
+  if (!args.sync && args.snapshot.empty()) { // Headless snapshot run stays deterministic
+    src = std::make_unique<ThreadedHandSource>(std::move(src));
+  }
+
   if (!audio.start()) {
     std::fprintf(stderr, "cannot start audio\n");
     return 1;
@@ -202,7 +213,7 @@ int main(int argc, char **argv) {
   SpectrumGrid grid;
   std::vector<float> tap(analyzer.windowSize());
 
-  // Settings from the last run (calibration, segment length, toggles)
+  // Settings from last run (calibration, segment length, toggles)
   const std::string settingsPath = Settings::defaultPath();
   Settings st;
   st.load(settingsPath);
@@ -250,6 +261,12 @@ int main(int argc, char **argv) {
 
     // One view: camera + skeletons + spectrum drawn inside hand grid
     cv::Mat view = src->frame().clone();
+    if (view.empty()) { // Worker has not produced a frame yet
+      if (args.snapshot.empty() && (cv::waitKey(1) & 0xFF) == 'q') {
+        break;
+      }
+      continue;
+    }
     if (dnn) {
       drawHands(view, hands, debugRoi);
     }

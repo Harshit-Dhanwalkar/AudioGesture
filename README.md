@@ -81,6 +81,15 @@ make run AUDIO=audio/file_example_WAV_2MG.wav        # or: build/audiogesture fi
 
 `make help` lists everything (`clean`, `distclean`, `rebuild`, `probe`, `test`, `test-asan`).
 Without models app says so and falls back to old skin-colour tracker (`--skin` forces it).
+
+Camera capture, low-light enhancement and both neural-net passes run on a worker thread (`ThreadedHandSource`), so the
+window, spectrum and audio control keep running at display rate while tracking takes 20-60 ms per frame; the HUD shows
+both rates. `--sync` tracks on the UI thread instead (for debugging).
+
+Left/right comes from the screen position (preview is a mirror) and once it has seen two clearly separated hands,
+also from the model's handedness output: its polarity is learned, not assumed, so a hand that reaches across to
+the other half of the picture or hands that cross keep their roles. Until that is learned it behaves as before.
+
 MP3 needs libsndfile >= 1.1; otherwise convert to WAV.
 
 ## Tests
@@ -97,6 +106,8 @@ make test-asan     # same under AddressSanitizer + UBSan
 | `test_mapper`       | distance -> stretch, edge heights -> signed gains (rectangle, fist, upside-down, twist), single hand holds values, sweep vs stretch, calibrate, pitch; pinch with hysteresis, roll -> cutoffs, effects off, no stuck freeze when a hand leaves |
 | `test_spectrum`     | a sine lands in right log-spaced bar, silence decays                                                                                                  |
 | `test_enhancer`     | dark frames get brighter, bright ones untouched, denoise lowers noise without smearing a moving block                                                 |
+| `test_handedness`   | learns the model's polarity from separated hands (both conventions), settles crossed hands and a lone hand on the far side, ignores unsure or contradictory votes |
+| `test_threaded`     | newest-wins hand-over between tracking and UI threads, frame/state stay paired, end of stream, clean shutdown (also run under TSan in CI) |
 | `test_grid`         | bars stay inside trapezium / triangle / inverted / twisted quad                                                                                       |
 | `test_recorder`     | recorded WAV equals what engine played, bit for bit; double start/stop and bad paths are safe                                                         |
 | `test_settings`     | save/load round trip, clamping, garbage lines ignored                                                                                                 |

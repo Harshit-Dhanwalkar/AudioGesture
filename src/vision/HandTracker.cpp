@@ -16,16 +16,16 @@
 
 namespace {
 
-constexpr int kPalmIn = 192; // palm detector input (square)
-constexpr int kHandIn = 224; // landmark model input (square)
+constexpr int kPalmIn = 192; // Palm detector input (square)
+constexpr int kHandIn = 224; // Landmark model input (square)
 constexpr float kPi = 3.14159265358979f;
 
 const std::vector<std::string> kLandmarkOuts = {
-    "Identity",   // [0] 21x(xyz) landmarks, crop pixels
-    "Identity_1", // [1] presence (0..1)   <- score we want (checked against
+    "Identity",   // [0] 21x(xyz) Landmarks, crop pixels
+    "Identity_1", // [1] Presence (0..1) <- score we want (checked against
                   //     ONNX Runtime: ~0.98 on a hand crop, ~0.01 on black)
-    "Identity_2", // [2] handedness (unused)
-    "Identity_3", // [3] 21x(xyz) world landmarks, metres
+    "Identity_2", // [2] Handedness (0..1; which end is "left" is learned)
+    "Identity_3", // [3] 21x(xyz) World landmarks, metres
 };
 
 // HAND_DEBUG read once at startup
@@ -40,15 +40,15 @@ double nowMs() {
 
 bool fileExists(const std::string &p) { return std::ifstream(p).good(); }
 
-// SSD anchors of MediaPipe palm detector.Fixed-size anchors, so only cell
-// centres matter: a 24x24 grid with 2 anchors per cell (stride 8) followed by a
-// 12x12 grid with 6 per cell (stride 16) = 1152 + 864 = 2016. Row-major, centre
-// of cell (x,y) = ((x+.5)/n, (y+.5)/n)
+// SSD anchors of MediaPipe palm detector.Fixed-size anchors, so only cell centres matter: a 24x24
+// grid with 2 anchors per cell (stride 8) followed by a 12x12 grid with 6 per cell (stride 16) =
+// 1152 + 864 = 2016. Row-major, centre of cell (x,y) = ((x+.5)/n, (y+.5)/n)
 std::vector<cv::Point2f> makeAnchors() {
   std::vector<cv::Point2f> a;
   a.reserve(2016);
 
-  const int grid[2] = {24, 12}, per[2] = {2, 6};
+  const int grid[2] = {24, 12};
+  const int per[2] = {2, 6};
   for (int l = 0; l < 2; ++l) {
     for (int y = 0; y < grid[l]; ++y) {
       for (int x = 0; x < grid[l]; ++x) {
@@ -62,11 +62,10 @@ std::vector<cv::Point2f> makeAnchors() {
   return a;
 }
 
-// OpenCV older than 4.7 can't parse stock landmark model (see
-// models/make_opencv_compat.py), so on those versions we try "_cvcompat" file
-// first
-cv::dnn::Net loadNet(const std::vector<std::string> &candidates,
-                     std::string &used, std::string &err) {
+// OpenCV older than 4.7 can't parse stock landmark model (see models/make_opencv_compat.py), so on
+// those versions we try "_cvcompat" file first
+cv::dnn::Net loadNet(const std::vector<std::string> &candidates, std::string &used,
+                     std::string &err) {
   using namespace cv::utils::logging;
   const LogLevel prev = getLogLevel();
   setLogLevel(LOG_LEVEL_SILENT);
@@ -86,8 +85,7 @@ cv::dnn::Net loadNet(const std::vector<std::string> &candidates,
         return net;
       }
     } catch (const cv::Exception &e) {
-      err = "OpenCV " CV_VERSION " could not load " + p + ": " +
-            e.msg.substr(0, e.msg.find('\n'));
+      err = "OpenCV " CV_VERSION " could not load " + p + ": " + e.msg.substr(0, e.msg.find('\n'));
     }
   }
 
@@ -101,23 +99,17 @@ cv::dnn::Net loadNet(const std::vector<std::string> &candidates,
 }
 
 // Hand "up" direction in image coordinates for a crop rotated by `angle`
-inline cv::Point2f upVec(float angle) {
-  return {std::sin(angle), -std::cos(angle)};
-}
+inline cv::Point2f upVec(float angle) { return {std::sin(angle), -std::cos(angle)}; }
 
-inline cv::Point2f rightVec(float angle) {
-  return {std::cos(angle), std::sin(angle)};
-}
+inline cv::Point2f rightVec(float angle) { return {std::cos(angle), std::sin(angle)}; }
 
-// Rotation that makes vector wrist->middle-finger point "up" in crop angle =
-// \atan2(dx, -dy): 0 when fingers point up image, +90deg when they point right
+// Rotation that makes vector wrist->middle-finger point "up" in crop angle = \atan2(dx, -dy): 0
+// when fingers point up image, +90deg when they point right
 inline float handAngle(cv::Point2f wrist, cv::Point2f middle) {
   return std::atan2(middle.x - wrist.x, -(middle.y - wrist.y));
 }
 
-inline float dist(cv::Point2f a, cv::Point2f b) {
-  return std::hypot(a.x - b.x, a.y - b.y);
-}
+inline float dist(cv::Point2f a, cv::Point2f b) { return std::hypot(a.x - b.x, a.y - b.y); }
 
 } // namespace
 
@@ -189,11 +181,10 @@ LandmarkHandTracker::LandmarkHandTracker(const HandTrackerConfig &cfg)
     return;
   }
 
-  // Verify canonical output names are all present so name-pinned forward()
-  // below can't silently fall back to an unexpected order
+  // Verify canonical output names are all present so name-pinned forward() below can't silently
+  // fall back to an unexpected order
   for (const std::string &want : kLandmarkOuts) {
-    if (std::find(handOutNames_.begin(), handOutNames_.end(), want) ==
-        handOutNames_.end()) {
+    if (std::find(handOutNames_.begin(), handOutNames_.end(), want) == handOutNames_.end()) {
       error_ = "landmark model is missing output '" + want + "'; got:";
       for (const auto &n : handOutNames_) {
         error_ += " '" + n + "'";
@@ -217,8 +208,7 @@ LandmarkHandTracker::LandmarkHandTracker(const HandTrackerConfig &cfg)
 
 // Stage 1
 
-std::vector<LandmarkHandTracker::Palm>
-LandmarkHandTracker::detectPalms(const cv::Mat &bgr) {
+std::vector<LandmarkHandTracker::Palm> LandmarkHandTracker::detectPalms(const cv::Mat &bgr) {
   const double t0 = nowMs();
   const int W = bgr.cols;
   const int H = bgr.rows;
@@ -227,22 +217,23 @@ LandmarkHandTracker::detectPalms(const cv::Mat &bgr) {
   const float ratio = std::min(float(kPalmIn) / W, float(kPalmIn) / H);
   const cv::Size rs(std::max(1, int(W * ratio)), std::max(1, int(H * ratio)));
   cv::resize(bgr, tmp_, rs, 0, 0,
-             cv::INTER_AREA); // area averaging: shrinks AND denoises (bilinear
-                              // would alias)
-  const int padW = kPalmIn - rs.width, padH = kPalmIn - rs.height;
-  const int left = padW / 2, top = padH / 2;
-  cv::copyMakeBorder(tmp_, tmp_, top, padH - top, left, padW - left,
-                     cv::BORDER_CONSTANT, cv::Scalar(0, 0, 0));
+             cv::INTER_AREA); // Area averaging: shrinks AND denoises (bilinear would alias)
+  const int padW = kPalmIn - rs.width;
+  const int padH = kPalmIn - rs.height;
+  const int left = padW / 2;
+  const int top = padH / 2;
+  cv::copyMakeBorder(tmp_, tmp_, top, padH - top, left, padW - left, cv::BORDER_CONSTANT,
+                     cv::Scalar(0, 0, 0));
   cv::cvtColor(tmp_, tmp_, cv::COLOR_BGR2RGB);
   tmp_.convertTo(tmpF_, CV_32FC3, 1.0 / 255.0);
 
-  // Model wants NHWC: a float HxWx3 image is already laid out that way in
-  // memory
+  // Model wants NHWC: a float HxWx3 image is already laid out that way in memory
   const int sz[4] = {1, kPalmIn, kPalmIn, 3};
   palmNet_.setInput(cv::Mat(4, sz, CV_32F, tmpF_.data));
   palmNet_.forward(palmOuts_, palmOutNames_);
 
-  const cv::Mat *boxes = nullptr, *scores = nullptr;
+  const cv::Mat *boxes = nullptr;
+  const cv::Mat *scores = nullptr;
   for (const cv::Mat &m : palmOuts_) {
     if (m.dims == 3 && m.size[2] == 18) {
       boxes = &m;
@@ -258,16 +249,15 @@ LandmarkHandTracker::detectPalms(const cv::Mat &bgr) {
   }
 
   // Network outputs are offsets from anchor, in units of 192 px input:
-  //   centre = anchor + d/192,  size = wh/192,  keypoint = anchor + k/192 (all
-  //   in 0..1 of letterboxed square)
-  // Map back to source pixels: square covers max(W,H) source pixels, minus
-  // padding
+  //   centre = anchor + d/192,  size = wh/192,  keypoint = anchor + k/192 (all in 0..1 of
+  //   letterboxed square)
+  // Map back to source pixels: square covers max(W,H) source pixels, minus padding
   const float scale = float(std::max(W, H));
   const float padX = left / ratio, padY = top / ratio;
   const float *b = boxes->ptr<float>();
   const float *s = scores->ptr<float>();
-  const float logitThr = std::log(
-      cfg_.palmScore / (1.f - cfg_.palmScore)); // compare logits, skip sigmoid
+  const float logitThr =
+      std::log(cfg_.palmScore / (1.f - cfg_.palmScore)); // Compare logits, skip sigmoid
 
   std::vector<cv::Rect2d> rects;
   std::vector<float> confs;
@@ -288,15 +278,14 @@ LandmarkHandTracker::detectPalms(const cv::Mat &bgr) {
   }
 
   std::vector<int> keep;
-  cv::dnn::NMSBoxes(rects, confs, cfg_.palmScore, cfg_.palmNms,
-                    keep); // returns best-first
+  cv::dnn::NMSBoxes(rects, confs, cfg_.palmScore, cfg_.palmNms, keep); // Returns best-first
 
   for (int k : keep) {
     const float *r = b + size_t(ids[k]) * 18;
     const cv::Point2f a = anchors_[ids[k]];
     Palm p;
-    p.box = cv::Rect2f(float(rects[k].x), float(rects[k].y),
-                       float(rects[k].width), float(rects[k].height));
+    p.box = cv::Rect2f(float(rects[k].x), float(rects[k].y), float(rects[k].width),
+                       float(rects[k].height));
     p.score = confs[k];
     for (int j = 0; j < 7; ++j) {
       p.kp[j] = {(r[4 + 2 * j] / kPalmIn + a.x) * scale - padX,
@@ -309,9 +298,8 @@ LandmarkHandTracker::detectPalms(const cv::Mat &bgr) {
   if (kDebug) {
     std::fprintf(stderr, "[palm] %zu candidates\n", result.size());
     for (size_t i = 0; i < std::min(result.size(), size_t(3)); ++i) {
-      std::fprintf(stderr, "[palm] #%zu score=%.3f box=(%.0f,%.0f %.0fx%.0f)\n",
-                   i, result[i].score, result[i].box.x, result[i].box.y,
-                   result[i].box.width, result[i].box.height);
+      std::fprintf(stderr, "[palm] #%zu score=%.3f box=(%.0f,%.0f %.0fx%.0f)\n", i, result[i].score,
+                   result[i].box.x, result[i].box.y, result[i].box.width, result[i].box.height);
     }
   }
 
@@ -319,8 +307,7 @@ LandmarkHandTracker::detectPalms(const cv::Mat &bgr) {
   return result;
 }
 
-// Palm detection -> crop for stage 2 (MediaPipe's palm_detection -> hand ROI
-// rules):
+// Palm detection -> crop for stage 2 (MediaPipe's palm_detection -> hand ROI rules):
 //  * rotate so wrist (kp0) -> middle-finger base (kp2) points up
 //  * move window 0.5 box-heights toward fingers (box covers palm only)
 //  * make it square on longer side and enlarge x2.6 so all fingers fit
@@ -329,33 +316,35 @@ LandmarkHandTracker::Roi LandmarkHandTracker::roiFromPalm(const Palm &p) {
   const float a = handAngle(p.kp[0], p.kp[2]);
   r.angle = std::clamp(a, -0.6f, 0.6f);
 
-  const cv::Point2f centre(p.box.x + p.box.width / 2,
-                           p.box.y + p.box.height / 2);
+  const cv::Point2f centre(p.box.x + p.box.width / 2, p.box.y + p.box.height / 2);
   r.c = centre + upVec(r.angle) * (0.5f * p.box.height);
   r.size = std::max(p.box.width, p.box.height) * 2.4f;
 
   return r;
 }
 
-// Joints from this frame -> crop for next frame (MediaPipe's landmarks -> ROI
-// rules): bounding box of joints measured in hand's own (rotated) frame,
-// shifted 0.1 heights toward fingertips, squared and enlarged x2
+// Joints from this frame -> crop for next frame (MediaPipe's landmarks -> ROI rules): bounding box
+// of joints measured in hand's own (rotated) frame, shifted 0.1 heights toward fingertips, squared
+// and enlarged x2
 //
-// Joints are clamped into frame first.  A hand that pokes out of image gets its
-// hidden fingers "hallucinated" outside it; letting those phantom points steer
-// next crop made ROI creep outward frame after frame until hand was lost
-LandmarkHandTracker::Roi LandmarkHandTracker::roiFromLandmarks(
-    const std::array<cv::Point2f, kNumLandmarks> &px, int W, int H) {
+// Joints are clamped into frame first
+// A hand that pokes out of image gets its hidden fingers "hallucinated" outside it; letting those
+// phantom points steer next crop made ROI creep outward frame after frame until hand was lost
+LandmarkHandTracker::Roi
+LandmarkHandTracker::roiFromLandmarks(const std::array<cv::Point2f, kNumLandmarks> &px, int W,
+                                      int H) {
   Roi r;
   r.angle = handAngle(px[0], px[9]);
   const cv::Point2f R = rightVec(r.angle), U = upVec(r.angle);
   auto inFrame = [&](cv::Point2f p) {
-    return cv::Point2f(std::clamp(p.x, 0.f, W - 1.f),
-                       std::clamp(p.y, 0.f, H - 1.f));
+    return cv::Point2f(std::clamp(p.x, 0.f, W - 1.f), std::clamp(p.y, 0.f, H - 1.f));
   };
 
   const cv::Point2f wrist = inFrame(px[0]);
-  float minU = 1e9f, maxU = -1e9f, minV = 1e9f, maxV = -1e9f;
+  float minU = 1e9f;
+  float maxU = -1e9f;
+  float minV = 1e9f;
+  float maxV = -1e9f;
   for (const auto &p : px) {
     const cv::Point2f d = inFrame(p) - wrist;
     const float u = d.x * R.x + d.y * R.y, v = d.x * U.x + d.y * U.y;
@@ -369,14 +358,14 @@ LandmarkHandTracker::Roi LandmarkHandTracker::roiFromLandmarks(
   const float w = maxU - minU, h = maxV - minV;
   r.c = wrist + R * ((minU + maxU) / 2) + U * ((minV + maxV) / 2 + 0.1f * h);
   r.size = std::max(w, h) * 2.0f;
+
   return r;
 }
 
 // Stage 2
 
-bool LandmarkHandTracker::runLandmarks(
-    const cv::Mat &bgr, const Roi &roi,
-    std::array<cv::Point2f, kNumLandmarks> &px, float &score) {
+bool LandmarkHandTracker::runLandmarks(const cv::Mat &bgr, const Roi &roi,
+                                       std::array<cv::Point2f, kNumLandmarks> &px, float &score) {
   if (!(roi.size > 8.f) || !std::isfinite(roi.c.x) || !std::isfinite(roi.c.y)) {
     return false;
   }
@@ -384,31 +373,28 @@ bool LandmarkHandTracker::runLandmarks(
   const double t0 = nowMs();
 
   // Affine map crop pixel (u,v) -> source pixel: p = C + R * k * ((u,v) - 112)
-  // (k = source pixels per crop pixel). warpAffine with WARP_INVERSE_MAP takes
-  // exactly this dst->src matrix and does rotate + scale + crop in one
-  // resampling step
+  // (k = source pixels per crop pixel). warpAffine with WARP_INVERSE_MAP takes exactly this
+  // dst->src matrix and does rotate + scale + crop in one resampling step
   const float k = roi.size / kHandIn;
   const float c = std::cos(roi.angle);
   const float s = std::sin(roi.angle);
   const float h = kHandIn * 0.5f;
-  const cv::Matx23f A(c * k, -s * k, roi.c.x - c * k * h + s * k * h, s * k,
-                      c * k, roi.c.y - s * k * h - c * k * h);
-  cv::warpAffine(bgr, crop_, A, cv::Size(kHandIn, kHandIn),
-                 cv::INTER_LINEAR | cv::WARP_INVERSE_MAP, cv::BORDER_CONSTANT,
-                 cv::Scalar(0, 0, 0));
+  const cv::Matx23f A(c * k, -s * k, roi.c.x - c * k * h + s * k * h, s * k, c * k,
+                      roi.c.y - s * k * h - c * k * h);
+  cv::warpAffine(bgr, crop_, A, cv::Size(kHandIn, kHandIn), cv::INTER_LINEAR | cv::WARP_INVERSE_MAP,
+                 cv::BORDER_CONSTANT, cv::Scalar(0, 0, 0));
   cv::cvtColor(crop_, crop_, cv::COLOR_BGR2RGB);
   crop_.convertTo(cropF_, CV_32FC3, 1.0 / 255.0);
 
   if (kDebugRoi) {
-    std::fprintf(stderr, "[roi] c=(%.1f,%.1f) size=%.1f angle=%.1fdeg\n",
-                 roi.c.x, roi.c.y, roi.size, roi.angle * 180.0f / kPi);
+    std::fprintf(stderr, "[roi] c=(%.1f,%.1f) size=%.1f angle=%.1fdeg\n", roi.c.x, roi.c.y,
+                 roi.size, roi.angle * 180.0f / kPi);
   }
 
-  // Model wants NHWC: a float HxWx3 image is already laid out that way in
-  // memory. Forward by name so handOuts_[i] maps to a known tensor on any
-  // OpenCV version (getUnconnectedOutLayersNames order is graph-traversal
-  // dependent - on 4.5.4 it lands at {Identity, Identity_3, Identity_2,
-  // Identity_1})
+  // Model wants NHWC: a float HxWx3 image is already laid out that way in memory
+  // Forward by name so handOuts_[i] maps to a known tensor on any OpenCV version
+  // (getUnconnectedOutLayersNames order is graph-traversal dependent - on 4.5.4 it lands at
+  // {Identity, Identity_3, Identity_2, Identity_1})
   const int sz[4] = {1, kHandIn, kHandIn, 3};
   handNet_.setInput(cv::Mat(4, sz, CV_32F, cropF_.data));
   if (useNamedOuts_) {
@@ -420,9 +406,8 @@ bool LandmarkHandTracker::runLandmarks(
   if (kDebug) {
     std::fprintf(stderr, "[lm] outs=%zu", handOuts_.size());
     for (size_t i = 0; i < handOuts_.size(); ++i) {
-      std::fprintf(
-          stderr, " [%zu:total=%d first=%.4f]", i, (int)handOuts_[i].total(),
-          handOuts_[i].total() > 0 ? handOuts_[i].ptr<float>()[0] : 0.f);
+      std::fprintf(stderr, " [%zu:total=%d first=%.4f]", i, (int)handOuts_[i].total(),
+                   handOuts_[i].total() > 0 ? handOuts_[i].ptr<float>()[0] : 0.f);
     }
     std::fprintf(stderr, "\n");
   }
@@ -442,8 +427,8 @@ bool LandmarkHandTracker::runLandmarks(
     return false;
   }
 
-  // Sanity check: if forward() silently gave world-landmark tensor in slot 0,
-  // landmark magnitudes would be < 1 m instead of > 10 px
+  // Sanity check: if forward() silently gave world-landmark tensor in slot 0, landmark magnitudes
+  // would be < 1 m instead of > 10 px
   if (kDebug) {
     double mx = 0;
     cv::Mat mag = cv::abs(handOuts_[lmIdx].reshape(1, 1));
@@ -458,20 +443,21 @@ bool LandmarkHandTracker::runLandmarks(
 
   const float *lm = handOuts_[lmIdx].ptr<float>();
   score = handOuts_[scoreIdx].ptr<float>()[0];
+  lastHanded_ = (handOuts_.size() > 2 && handOuts_[2].total() == 1)
+                    ? std::clamp(handOuts_[2].ptr<float>()[0], 0.f, 1.f)
+                    : 0.5f;
   for (int i = 0; i < kNumLandmarks; ++i) {
-    const float x = lm[3 * i], y = lm[3 * i + 1];
-    px[i] = {A(0, 0) * x + A(0, 1) * y + A(0, 2),
-             A(1, 0) * x + A(1, 1) * y + A(1, 2)};
+    const float x = lm[3 * i];
+    const float y = lm[3 * i + 1];
+    px[i] = {A(0, 0) * x + A(0, 1) * y + A(0, 2), A(1, 0) * x + A(1, 1) * y + A(1, 2)};
   }
 
   return std::isfinite(score);
 }
 
-cv::Point2f LandmarkHandTracker::palmCentre(
-    const std::array<cv::Point2f, kNumLandmarks> &px) {
-  // Wrist + four finger bases: a rigid patch of hand that doesn't move when you
-  // curl your fingers, so it's a much steadier control point than a blob
-  // centroid
+cv::Point2f LandmarkHandTracker::palmCentre(const std::array<cv::Point2f, kNumLandmarks> &px) {
+  // Wrist + four finger bases: a rigid patch of hand that doesn't move when you curl your fingers,
+  // so it's a much steadier control point than a blob centroid
   static const int ids[5] = {0, 5, 9, 13, 17};
   cv::Point2f c(0, 0);
   for (int i : ids) {
@@ -501,18 +487,20 @@ LandmarkHandTracker::Track *LandmarkHandTracker::freeTrack() {
   return nullptr;
 }
 
-// Fallback acquisition. Wide square crops (no rotation) at fixed places; the
-// landmark model's presence score decides. Cycles one crop per frame so the
-// cost stays at a single landmark pass (~10 ms), at most kScan frames to sweep.
+// Fallback acquisition
+// Wide square crops (no rotation) at fixed places;
+// landmark model's presence score decides
+// Cycles one crop per frame so cost stays at a single landmark pass (~10 ms), at most kScan frames
+// to sweep
 bool LandmarkHandTracker::scanForHand(const cv::Mat &bgr,
-                                      std::array<cv::Point2f, kNumLandmarks> &px,
-                                      float &score) {
+                                      std::array<cv::Point2f, kNumLandmarks> &px, float &score) {
   const double t0 = nowMs();
   const float W = float(bgr.cols), H = float(bgr.rows);
-  struct Cand { float cx, cy, side; }; // fractions of W, H and of min(W, H)
-  static const Cand kScan[] = {
-      {0.25f, 0.55f, 1.0f}, {0.75f, 0.55f, 1.0f}, {0.50f, 0.55f, 1.0f},
-      {0.15f, 0.60f, 0.65f}, {0.85f, 0.60f, 0.65f}, {0.50f, 0.50f, 0.65f}};
+  struct Cand {
+    float cx, cy, side;
+  }; // fractions of W, H and of min(W, H)
+  static const Cand kScan[] = {{0.25f, 0.55f, 1.0f},  {0.75f, 0.55f, 1.0f},  {0.50f, 0.55f, 1.0f},
+                               {0.15f, 0.60f, 0.65f}, {0.85f, 0.60f, 0.65f}, {0.50f, 0.50f, 0.65f}};
   constexpr int kN = int(sizeof kScan / sizeof kScan[0]);
 
   const Cand &c = kScan[scanIdx_ % kN];
@@ -525,7 +513,7 @@ bool LandmarkHandTracker::scanForHand(const cv::Mat &bgr,
   bool ok = false;
   float sc = 0.f;
   if (runLandmarks(bgr, roi, px, sc) && sc >= cfg_.scanPresence) {
-    // Sanity: a real hand has a sensible size and sits (mostly) inside the crop
+    // Sanity: a real hand has a sensible size and sits (mostly) inside crop
     const float span = dist(px[0], px[9]);
     ok = span > 0.04f * std::min(W, H) && span < 0.9f * roi.size;
     score = sc;
@@ -533,8 +521,7 @@ bool LandmarkHandTracker::scanForHand(const cv::Mat &bgr,
 
   if (kDebug) {
     std::fprintf(stderr, "[scan] crop %d c=(%.0f,%.0f) size=%.0f presence=%.2f -> %s\n",
-                 (scanIdx_ + kN - 1) % kN, roi.c.x, roi.c.y, roi.size, sc,
-                 ok ? "HAND" : "no");
+                 (scanIdx_ + kN - 1) % kN, roi.c.x, roi.c.y, roi.size, sc, ok ? "HAND" : "no");
   }
   scanMs_ = nowMs() - t0;
   return ok;
@@ -552,8 +539,7 @@ void LandmarkHandTracker::reset() {
 
 // Per-frame logic
 
-void LandmarkHandTracker::process(const cv::Mat &bgr, double dt,
-                                  HandState &out) {
+void LandmarkHandTracker::process(const cv::Mat &bgr, double dt, HandState &out) {
   out = HandState{};
   if (!ok_ || bgr.empty()) {
     return;
@@ -576,6 +562,7 @@ void LandmarkHandTracker::process(const cv::Mat &bgr, double dt,
     if (runLandmarks(bgr, t.roi, px, score) && score >= cfg_.presenceKeep) {
       t.raw = px;
       t.score = score;
+      t.handed += 0.3f * (lastHanded_ - t.handed);
       t.roi = roiFromLandmarks(px, W, H);
       ++t.age;
     } else {
@@ -584,11 +571,9 @@ void LandmarkHandTracker::process(const cv::Mat &bgr, double dt,
     }
   }
 
-  // If a hand is missing, run palm detector: every frame if none is tracked,
-  // immediately
-  //    when one was just lost (so it is re-acquired without a gap), otherwise
-  //    only every few frames so a second hand is picked up without paying for
-  //    detector constantly
+  // If a hand is missing, run palm detector: every frame if none is tracked, immediately
+  // when one was just lost (so it is re-acquired without a gap), otherwise only every few frames so
+  // a second hand is picked up without paying for detector constantly
   int nActive = 0;
   for (const Track &t : tracks_) {
     nActive += t.active;
@@ -654,30 +639,34 @@ void LandmarkHandTracker::process(const cv::Mat &bgr, double dt,
   // Two tracks that slid onto same hand: keep more confident one
   if (nActive == 2) {
     Track &a = tracks_[0], &b = tracks_[1];
-    if (dist(palmCentre(a.raw), palmCentre(b.raw)) <
-        0.25f * std::min(a.roi.size, b.roi.size)) {
+    if (dist(palmCentre(a.raw), palmCentre(b.raw)) < 0.25f * std::min(a.roi.size, b.roi.size)) {
       (a.score >= b.score ? b : a).active = false;
       --nActive;
     }
   }
 
   // Left/right slots
-  // A lone hand is "right" (drives pitch/direction). When a second hand shows
-  // up, one further left on screen becomes "left"; after that each hand keeps
-  // its slot even if they cross
+  // Preview is a mirror, so hand further left on screen is user's left hand slot 0)
+  // Model's handedness output settles ambiguous cases once
+  // HandednessResolver has learned its polarity from hands that were clearly apart; until then it
+  // is screen position only
+  // A slot is only re-decided when a hand starts, or for a lone hand (which may be anywhere on
+  // screen); two tracked hands keep their slots when they cross, as before
   const bool anyFresh = tracks_[0].fresh || tracks_[1].fresh;
-  if (nActive == 2 && anyFresh) {
-    // The preview is a mirror, so the hand that is further left on screen is
-    // the user's left hand: slot 0 = left = smaller x
-    const bool zeroIsLeft =
-        palmCentre(tracks_[0].raw).x <= palmCentre(tracks_[1].raw).x;
-    tracks_[0].slot = zeroIsLeft ? 0 : 1;
-    tracks_[1].slot = zeroIsLeft ? 1 : 0;
+  auto nx = [&](const Track &t) { return palmCentre(t.raw).x / float(W); };
+  if (nActive == 2) {
+    handed_.learn(nx(tracks_[0]), tracks_[0].handed, nx(tracks_[1]), tracks_[1].handed);
+    if (anyFresh) {
+      const float x0 = nx(tracks_[0]);
+      const float x1 = nx(tracks_[1]);
+      const bool zeroIsLeft = handed_.isLeft(x0, tracks_[0].handed, &x1, &tracks_[1].handed);
+      tracks_[0].slot = zeroIsLeft ? 0 : 1;
+      tracks_[1].slot = zeroIsLeft ? 1 : 0;
+    }
   } else if (nActive == 1) {
     for (Track &t : tracks_) {
       if (t.active) {
-        // Mirror view: screen-left half = left hand (slot 0), right half = slot 1
-        t.slot = (palmCentre(t.raw).x < W * 0.5f) ? 0 : 1;
+        t.slot = handed_.isLeft(nx(t), t.handed) ? 0 : 1;
       }
     }
   }
@@ -711,16 +700,14 @@ void LandmarkHandTracker::process(const cv::Mat &bgr, double dt,
 }
 
 // Camera source
-CameraHandSource::CameraHandSource(int camIndex, const HandTrackerConfig &cfg,
-                                   int w, int h)
+CameraHandSource::CameraHandSource(int camIndex, const HandTrackerConfig &cfg, int w, int h)
     : cap_(camIndex), tracker_(cfg) {
   cap_.set(cv::CAP_PROP_FRAME_WIDTH, w);
   cap_.set(cv::CAP_PROP_FRAME_HEIGHT, h);
   cap_.set(cv::CAP_PROP_FPS, 30);
 }
 
-CameraHandSource::CameraHandSource(const std::string &videoFile,
-                                   const HandTrackerConfig &cfg)
+CameraHandSource::CameraHandSource(const std::string &videoFile, const HandTrackerConfig &cfg)
     : cap_(videoFile), tracker_(cfg), isFile_(true) {}
 
 bool CameraHandSource::poll(HandState &out) {
@@ -729,7 +716,7 @@ bool CameraHandSource::poll(HandState &out) {
       return false;
     }
 
-    cap_.set(cv::CAP_PROP_POS_FRAMES, 0); // loop video files
+    cap_.set(cv::CAP_PROP_POS_FRAMES, 0); // Loop video files
     if (!cap_.read(raw_) || raw_.empty()) {
       return false;
     }
@@ -738,10 +725,10 @@ bool CameraHandSource::poll(HandState &out) {
   if (isFile_) {
     mirrored_ = raw_;
   } else {
-    cv::flip(raw_, mirrored_, 1); // mirror webcams so it feels like a mirror
+    cv::flip(raw_, mirrored_, 1); // Mirror webcams so it feels like a mirror
   }
 
-  const cv::Mat &proc = enh_.apply(mirrored_); // brightened if room is dark
+  const cv::Mat &proc = enh_.apply(mirrored_); // Brightened if room is dark
 
   const double t = nowMs() / 1000.0;
   const double dt = (lastT_ > 0) ? t - lastT_ : 1.0 / 30.0;
@@ -751,23 +738,36 @@ bool CameraHandSource::poll(HandState &out) {
   tracker_.process(proc, dt, out);
   proc.copyTo(view_);
 
+  Stats st;
+  st.fps = fps_;
+  st.palmMs = tracker_.palmMs();
+  st.landmarkMs = tracker_.landmarkMs();
+  st.scanMs = tracker_.scanMs();
+  st.luma = enh_.meanLuma();
+  st.boostActive = enh_.active();
+  st.temporal = enh_.useTemporal;
+  st.mode = enh_.modeName();
+  {
+    std::lock_guard<std::mutex> lk(statsMu_);
+    stats_ = st;
+  }
+
   return true;
 }
 
 // Drawing
 void drawHands(cv::Mat &img, const HandState &hs, bool debugRoi) {
-  // Bones as (parent, child).  Landmark ids: 0 wrist; 1-4 thumb; 5-8 index;
-  // 9-12 middle; 13-16 ring; 17-20 pinky.
-  static const int bones[][2] = {
-      {0, 1},  {1, 2},   {2, 3},   {3, 4},   {0, 5},   {5, 6},   {6, 7},
-      {7, 8},  {9, 10},  {10, 11}, {11, 12}, {13, 14}, {14, 15}, {15, 16},
-      {0, 17}, {17, 18}, {18, 19}, {19, 20}, {5, 9},   {9, 13},  {13, 17}};
-  static const cv::Scalar fingerColour[5] = {
-      {0, 165, 255},
-      {90, 220, 90},
-      {255, 200, 40},
-      {255, 110, 70},
-      {220, 90, 255}}; // BGR: thumb..pinky
+  // Bones as (parent, child)
+  // Landmark ids: 0 wrist; 1-4 thumb; 5-8 index; 9-12 middle; 13-16 ring; 17-20 pinky
+  static const int bones[][2] = {{0, 1},   {1, 2},   {2, 3},  {3, 4},   {0, 5},   {5, 6},
+                                 {6, 7},   {7, 8},   {9, 10}, {10, 11}, {11, 12}, {13, 14},
+                                 {14, 15}, {15, 16}, {0, 17}, {17, 18}, {18, 19}, {19, 20},
+                                 {5, 9},   {9, 13},  {13, 17}};
+  static const cv::Scalar fingerColour[5] = {{0, 165, 255},
+                                             {90, 220, 90},
+                                             {255, 200, 40},
+                                             {255, 110, 70},
+                                             {220, 90, 255}}; // BGR: thumb..pinky
   static const cv::Scalar palmColour(235, 235, 235);
 
   auto finger = [](int i) { return i == 0 ? -1 : (i - 1) / 4; };
@@ -784,17 +784,14 @@ void drawHands(cv::Mat &img, const HandState &hs, bool debugRoi) {
 
     if (debugRoi) {
       const cv::Point2f R =
-          cv::Point2f(std::cos(h.roiAngle), std::sin(h.roiAngle)) *
-          (h.roiSize / 2);
+          cv::Point2f(std::cos(h.roiAngle), std::sin(h.roiAngle)) * (h.roiSize / 2);
       const cv::Point2f U =
-          cv::Point2f(std::sin(h.roiAngle), -std::cos(h.roiAngle)) *
-          (h.roiSize / 2);
+          cv::Point2f(std::sin(h.roiAngle), -std::cos(h.roiAngle)) * (h.roiSize / 2);
       const cv::Point2f c = h.roiCenter;
       const cv::Point2f q[4] = {c - R + U, c + R + U, c + R - U, c - R - U};
       for (int i = 0; i < 4; ++i)
         cv::line(img, q[i], q[(i + 1) % 4],
-                 i == 0 ? cv::Scalar(0, 255, 255) : cv::Scalar(0, 180, 180), 1,
-                 cv::LINE_AA);
+                 i == 0 ? cv::Scalar(0, 255, 255) : cv::Scalar(0, 180, 180), 1, cv::LINE_AA);
     }
 
     for (const auto &b : bones) {
@@ -804,27 +801,24 @@ void drawHands(cv::Mat &img, const HandState &hs, bool debugRoi) {
       const bool onFinger = (fa == fb && fa >= 0) || (b[0] == 0 && b[1] == 1);
       const cv::Scalar col = onFinger ? fingerColour[fb] : palmColour;
       cv::line(img, px(h, b[0]), px(h, b[1]), cv::Scalar(0, 0, 0), 4,
-               cv::LINE_AA); // dark outline for contrast
+               cv::LINE_AA); // Dark outline for contrast
       cv::line(img, px(h, b[0]), px(h, b[1]), col, 2, cv::LINE_AA);
     }
 
     for (int i = 0; i < kNumLandmarks; ++i) {
       const bool tip = i > 0 && i % 4 == 0;
       const int r = (i == 0) ? 6 : tip ? 5 : 3;
-      cv::circle(img, px(h, i), r + 1, cv::Scalar(0, 0, 0), cv::FILLED,
-                 cv::LINE_AA);
-      cv::circle(img, px(h, i), r,
-                 i == 0 ? palmColour : fingerColour[std::max(0, finger(i))],
+      cv::circle(img, px(h, i), r + 1, cv::Scalar(0, 0, 0), cv::FILLED, cv::LINE_AA);
+      cv::circle(img, px(h, i), r, i == 0 ? palmColour : fingerColour[std::max(0, finger(i))],
                  cv::FILLED, cv::LINE_AA);
     }
 
     char buf[24];
-    std::snprintf(buf, sizeof buf, "%s %.2f", (hp == &hs.left) ? "L" : "R",
-                  h.score);
+    std::snprintf(buf, sizeof buf, "%s %.2f", (hp == &hs.left) ? "L" : "R", h.score);
     const cv::Point w = px(h, 0);
-    cv::putText(img, buf, {w.x - 18, w.y + 22}, cv::FONT_HERSHEY_SIMPLEX, 0.45,
-                {0, 0, 0}, 3, cv::LINE_AA);
-    cv::putText(img, buf, {w.x - 18, w.y + 22}, cv::FONT_HERSHEY_SIMPLEX, 0.45,
-                {255, 255, 255}, 1, cv::LINE_AA);
+    cv::putText(img, buf, {w.x - 18, w.y + 22}, cv::FONT_HERSHEY_SIMPLEX, 0.45, {0, 0, 0}, 3,
+                cv::LINE_AA);
+    cv::putText(img, buf, {w.x - 18, w.y + 22}, cv::FONT_HERSHEY_SIMPLEX, 0.45, {255, 255, 255}, 1,
+                cv::LINE_AA);
   }
 }
