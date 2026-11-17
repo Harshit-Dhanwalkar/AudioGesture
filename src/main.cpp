@@ -20,6 +20,7 @@
 #include "audiogesture/audio/AudioEngine.h"
 #include "audiogesture/audio/SpectrumAnalyzer.h"
 #include "audiogesture/control/GestureMapper.h"
+#include "audiogesture/control/OscOut.h"
 #include "audiogesture/control/Settings.h"
 #include "audiogesture/ui/FilePicker.h"
 #include "audiogesture/ui/Onboarding.h"
@@ -36,6 +37,7 @@ struct Args {
   std::string source = "0"; // Camera index, or a video file (handy for testing without a webcam)
   std::string modelsDir;
   bool skin = false;    // Force old skin-colour tracker
+  std::string osc;      // "host:port" to publish gesture data over OSC/UDP
   bool sync = false;    // Track on UI thread (debugging) instead of a worker thread
   std::string record;   // Start recording to this WAV immediately (also: key r)
   std::string snapshot; // Headless smoke test: save view after ~40 frames and exit
@@ -44,7 +46,8 @@ struct Args {
 void usage(const char *exe) {
   std::fprintf(stderr,
                "usage: %s [audio.wav|flac|ogg|mp3] [camera_index | video_file] "
-               "[--models DIR] [--skin] [--sync] [--snapshot out.png] [--record out.wav]\n"
+               "[--models DIR] [--skin] [--sync] [--osc [host:]port] [--snapshot out.png] "
+               "[--record out.wav]\n"
                "  keys: l low-light boost (auto/on/off)   v bars/mirrored   d show tracking ROI"
                "   c calibrate pose\n"
                "  h help   p pitch on/off   e effects on/off   s segment length   t temporal "
@@ -63,6 +66,8 @@ bool parseArgs(int argc, char **argv, Args &a) {
     const std::string s = argv[i];
     if (s == "--skin") {
       a.skin = true;
+    } else if (s == "--osc" && i + 1 < argc) {
+      a.osc = argv[++i];
     } else if (s == "--sync") {
       a.sync = true;
     } else if (s == "--record" && i + 1 < argc) {
@@ -220,6 +225,19 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  OscSender osc;
+  if (!args.osc.empty()) {
+    std::string host;
+    int port = 0;
+    if (!parseOscTarget(args.osc, host, port) || !osc.open(host, port)) {
+      std::fprintf(stderr, "bad --osc target '%s' (expected [host:]port)\n", args.osc.c_str());
+      return 1;
+    }
+    std::printf("OSC -> %s:%d (/audiogesture/...)\n", host.c_str(), port);
+  }
+
+  double oscClock = 0;
+
   GestureMapper mapper;
   SpectrumAnalyzer analyzer;
   SpectrumGrid grid;
@@ -270,6 +288,10 @@ int main(int argc, char **argv) {
     fps = (fps == 0) ? 1.0 / std::max(dt, 1e-3) : 0.9 * fps + 0.1 / std::max(dt, 1e-3);
 
     audio.setParams(mapper.update(hands, dt));
+    if (osc.isOpen() && (oscClock += dt) >= 1.0 / 30.0) { // 30 messages-sets per second is plenty
+      oscClock = 0;
+      osc.sendAll(oscGestureFrame(mapper.params(), hands));
+    }
 
     // Spectrum of what is actually leaving speakers
     audio.copyRecent(tap.data(), tap.size());

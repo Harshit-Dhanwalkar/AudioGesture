@@ -35,6 +35,26 @@ Grid is drawn from same numbers audio engine receives.
 White playhead shows where read head is inside current 4-second segment, i.e. where engine is sampling gain ramp.
 There is no decorative waveform: every pixel is either grid or measured audio (spectrum of signal leaving speakers, so stretch/pitch/reverse show up).
 
+## OSC output
+Sending **Open Sound Control** messages across a network using the **User Datagram Protocol** for real-time
+communication.
+`build/audiogesture song.wav --osc 9000` (or `--osc host:port`) publishes gestures as OSC over UDP, 30 times
+a second (Pure Data, Max, SuperCollider, TouchDesigner or a MIDI bridge can react to your hands):
+
+| Address                          | Value                                                    |
+| -------------------------------- | -------------------------------------------------------- |
+| `/audiogesture/speed`            | float, 1 = calibrated rest pose (below 1 = slower)       |
+| `/audiogesture/direction`        | float, +1 forward ... -1 reverse                         |
+| `/audiogesture/gain/left`, `/right` | float, signed edge gain, -1 .. +1 (negative = upside-down hand) |
+| `/audiogesture/pitch`            | float, semitones (0 unless pitch mode `p` is on)         |
+| `/audiogesture/freeze`           | int, 1 while a hand pinches                              |
+| `/audiogesture/lowpass`, `/highpass` | float, cut-off in Hz (20000 / 20 = open)             |
+| `/audiogesture/hands`            | int, hands tracked (0-2)                                 |
+| `/audiogesture/left`, `/right`   | float x, float y, palm centre 0..1 (only while tracked)  |
+
+MIDI is not built in; any OSC-to-MIDI bridge (for example `osc2midi` or a few lines in Pd) turns these into
+CCs.
+
 ## Keys
 
 | Key       | Action                                                     |
@@ -109,6 +129,7 @@ make test-asan     # same under AddressSanitizer + UBSan
 | `test_enhancer`     | dark frames get brighter, bright ones untouched, denoise lowers noise without smearing a moving block                                                 |
 | `test_handedness`   | learns the model's polarity from separated hands (both conventions), settles crossed hands and a lone hand on the far side, ignores unsure or contradictory votes |
 | `test_onboarding`   | calibration countdown (needs both hands, restarts, fires once), help text covers every key, overlays draw and survive tiny frames, file picker order zenity -> kdialog -> none |
+| `test_osc`          | OSC wire format byte by byte, per-frame message set, `--osc` target parsing, real UDP round trip on loopback |
 | `test_threaded`     | newest-wins hand-over between tracking and UI threads, frame/state stay paired, end of stream, clean shutdown (also run under TSan in CI) |
 | `test_grid`         | bars stay inside trapezium / triangle / inverted / twisted quad                                                                                       |
 | `test_recorder`     | recorded WAV equals what engine played, bit for bit; double start/stop and bad paths are safe                                                         |
