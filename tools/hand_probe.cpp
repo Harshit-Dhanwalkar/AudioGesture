@@ -43,9 +43,7 @@
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    std::fprintf(stderr,
-                 "usage: %s <image|video> [options]  (see top of "
-                 "tools/hand_probe.cpp)\n",
+    std::fprintf(stderr, "usage: %s <image|video> [options]  (see top of tools/hand_probe.cpp)\n",
                  argv[0]);
     return 1;
   }
@@ -199,7 +197,7 @@ int main(int argc, char **argv) {
 
   cv::Mat view;
   HandState hs;
-  int bothFrames, = 0;
+  int bothFrames = 0;
   int anyFrames = 0;
   int total = 0;
   double scoreSum = 0;
