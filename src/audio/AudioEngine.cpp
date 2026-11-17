@@ -135,6 +135,9 @@ void AudioEngine::setParams(const EngineParams &p) {
   tDir_.store(clampf(p.direction, -1.f, 1.f), std::memory_order_relaxed);
   tGain_.store(clampf(p.gain, 0.f, 1.f), std::memory_order_relaxed);
   tInvert_.store(clampf(p.invert, -1.f, 1.f), std::memory_order_relaxed);
+  tFreeze_.store(p.freeze ? 1.f : 0.f, std::memory_order_relaxed);
+  tLp_.store(std::log2(clampf(p.lpHz, 40.f, 20000.f)), std::memory_order_relaxed);
+  tHp_.store(std::log2(clampf(p.hpHz, 10.f, 8000.f)), std::memory_order_relaxed);
   tEnvL_.store(clampf(p.envL, -1.f, 1.f), std::memory_order_relaxed);
   tEnvR_.store(clampf(p.envR, -1.f, 1.f), std::memory_order_relaxed);
   tSeg_.store(clampf(p.segSec, 0.25f, 30.f), std::memory_order_relaxed);
@@ -162,14 +165,22 @@ void AudioEngine::spawnGrain() {
 
   const int len = std::max(128, static_cast<int>(grainMs_ * 0.001 * devSR_));
   slot->active = true;
-  slot->pos = head_;                       // grain starts where read head currently is
-  slot->sign = (dir_ >= 0.f) ? 1.0 : -1.0; // grains play backward too when reversed
+  // Grain starts where read head is
+  // While frozen it starts up to +-40 ms away at random ("spray")
+  double start = head_;
+  if (freeze_ > 0.01f) {
+    start += (rand01() - 0.5) * 0.08 * fileSR_ * freeze_;
+    const double n = static_cast<double>(left_.size());
+    start = std::fmod(std::fmod(start, n) + n, n);
+  }
+  slot->pos = start;
+  slot->sign = (dir_ >= 0.f) ? 1.0 : -1.0; // Grains play backward too when reversed
   slot->age = 0;
   slot->len = len;
 
   // Hop = len / 2 -> 50% overlap
-  // A periodic Hann window at 50% overlap sums to exactly 1.0, so output level
-  // is constant (no amplitude ripple)
+  // A periodic Hann window at 50% overlap sums to exactly 1.0, so output level is constant (no
+  // amplitude ripple)
   countdown_ = len / 2;
 }
 
@@ -187,23 +198,33 @@ void AudioEngine::render(float *out, unsigned long frames) {
   const float tD = tDir_.load(std::memory_order_relaxed);
   const float tV = tGain_.load(std::memory_order_relaxed);
   const float tI = tInvert_.load(std::memory_order_relaxed);
+  const float tFz = tFreeze_.load(std::memory_order_relaxed);
+  const float tLp = tLp_.load(std::memory_order_relaxed);
+  const float tHp = tHp_.load(std::memory_order_relaxed);
   const float tEL = tEnvL_.load(std::memory_order_relaxed);
   const float tER = tEnvR_.load(std::memory_order_relaxed);
   const double segLen =
       std::max(256.0, static_cast<double>(tSeg_.load(std::memory_order_relaxed)) * fileSR_);
 
-  const double srRatio = fileSR_ / devSR_; // source samples consumed per output sample at 1x
+  const double srRatio = fileSR_ / devSR_; // Source samples consumed per output sample at 1x
   uint64_t wpos = ringPos_.load(std::memory_order_relaxed);
 
+  // Filters only run when at least one is away from its bypass setting
+  // (target decides, so they are also active while sweeping back)
+  const bool filtOn = tLp < 14.2f || tHp > 4.6f || lpLog_ < 14.2f || hpLog_ > 4.6f;
+
   for (unsigned long i = 0; i < frames; ++i) {
-    // parameter smoothing (per-sample, audio thread)
+    // Parameter smoothing (per-sample, audio thread)
     stretch_ += static_cast<float>(aSlow_) * (tS - stretch_);
     grainMs_ += static_cast<float>(aSlow_) * (tG - grainMs_);
     pitch_ += static_cast<float>(aSlow_) * (tP - pitch_);
     dir_ +=
-        static_cast<float>(aFast_) * (tD - dir_); // passes through 0 => tape-style slowdown/scrub
+        static_cast<float>(aFast_) * (tD - dir_); // Passes through 0 => tape-style slowdown/scrub
     gain_ += static_cast<float>(aFast_) * (tV - gain_);
     invert_ += static_cast<float>(aFast_) * (tI - invert_);
+    freeze_ += static_cast<float>(aFast_) * (tFz - freeze_);
+    lpLog_ += static_cast<float>(aSlow_) * (tLp - lpLog_);
+    hpLog_ += static_cast<float>(aSlow_) * (tHp - hpLog_);
     envL_ += static_cast<float>(aFast_) * (tEL - envL_);
     envR_ += static_cast<float>(aFast_) * (tER - envR_);
 
@@ -213,7 +234,8 @@ void AudioEngine::render(float *out, unsigned long frames) {
 
     // Read-head speed (source samples per output sample)
     // Time-stretch factor S slows head by 1/S; direction flips/scrubs it
-    head_ += static_cast<double>(dir_) * srRatio / std::max(0.05f, stretch_);
+    // freeze_ scales head speed to 0 (smoothly, like a tape stop)
+    head_ += static_cast<double>(dir_) * srRatio / std::max(0.05f, stretch_) * (1.0 - freeze_);
     if (head_ >= N) {
       head_ -= N;
     } else if (head_ < 0) {
@@ -224,7 +246,7 @@ void AudioEngine::render(float *out, unsigned long frames) {
       spawnGrain();
     }
 
-    // sum active grains
+    // Sum active grains
     float accL = 0.f;
     float accR = 0.f;
     for (auto &g : grains_) {
@@ -232,7 +254,7 @@ void AudioEngine::render(float *out, unsigned long frames) {
         continue;
       }
       // Hann window: w = 0.5 * (1 - \cos(2 * \pi * age/len))
-      // zero at both edges => click-free
+      // Zero at both edges => click-free
       const float w = 0.5f * (1.f - static_cast<float>(std::cos(kTwoPi * g.age / g.len)));
 
       // Linear-interpolated read with wrap-around at buffer edges
@@ -242,7 +264,7 @@ void AudioEngine::render(float *out, unsigned long frames) {
       accL += w * (left_[i0] + frac * (left_[i1] - left_[i0]));
       accR += w * (R[i0] + frac * (R[i1] - R[i0]));
 
-      g.pos += g.sign * pitchRate * srRatio; // grain pitch is independent of head speed
+      g.pos += g.sign * pitchRate * srRatio; // Grain pitch is independent of head speed
       if (g.pos >= N) {
         g.pos -= N;
       } else if (g.pos < 0) {
@@ -258,12 +280,26 @@ void AudioEngine::render(float *out, unsigned long frames) {
     const float u = static_cast<float>(std::fmod(head_, segLen) / segLen);
     const float env = envL_ + (envR_ - envL_) * u;
 
-    const float sL = std::tanh(accL * gain_ * env) * invert_; // soft clip
+    const float sL = std::tanh(accL * gain_ * env) * invert_; // Soft clip
     const float sR = std::tanh(accR * gain_ * env) * invert_;
-    out[2 * i] = sL;
-    out[2 * i + 1] = sR;
-    ring_[wpos++ & (kRing - 1)].store(0.5f * (sL + sR),
-                                      std::memory_order_relaxed); // visualizer tap (mono mix)
+    float oL = sL;
+    float oR = sR;
+    if (filtOn) {
+      // Coefficients change slowly; recomputing every 16 samples is plenty
+      if ((filtTick_++ & 15) == 0) {
+        const double lpHz = std::exp2(double(lpLog_)), hpHz = std::exp2(double(hpLog_));
+        for (int ch = 0; ch < 2; ++ch) {
+          lp_[ch].lowpass(lpHz, devSR_);
+          hp_[ch].highpass(hpHz, devSR_);
+        }
+      }
+      oL = hp_[0].process(lp_[0].process(oL));
+      oR = hp_[1].process(lp_[1].process(oR));
+    }
+    out[2 * i] = oL;
+    out[2 * i + 1] = oR;
+    ring_[wpos++ & (kRing - 1)].store(0.5f * (oL + oR),
+                                      std::memory_order_relaxed); // Visualizer tap (mono mix)
   }
 
   rec_.push(out, frames);

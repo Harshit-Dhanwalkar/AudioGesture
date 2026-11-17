@@ -20,13 +20,16 @@ AudioGesture is a real-time, C++ granular audio engine controlled entirely by yo
 
 ## Gestures
 
-| Gesture                                         | Effect                                                                                                                                                              |
-| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Distance between hands                          | Length of grid = playback speed. Pull apart = slower, push together = faster (`speed = restLength / length`, 0.25x-4x)                                              |
-| Height of each hand (wrist to middle fingertip) | Amplitude at that end of grid. Open hand = loud, fist = silent. Different heights give a trapezium, a fist gives a triangle; gain slides linearly between two edges |
-| A hand upside down                              | That edge goes negative: bars hang from top and audio is phase-inverted. One flipped hand twists grid through zero                                                  |
-| Sweep both hands sideways, fast                 | Latch reverse / forward (pulling apart is ignored, only a pure sweep counts)                                                                                        |
-| Mean height of both hands (key `p`)             | Pitch +-12 semitones (off by default)                                                                                                                               |
+| Gesture                                             | Effect                                                                                                                                                              |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Distance between hands                              | Length of grid = playback speed. Pull apart = slower, push together = faster (`speed = restLength / length`, 0.25x-4x)                                              |
+| Height of each hand (wrist to middle fingertip)     | Amplitude at that end of grid. Open hand = loud, fist = silent. Different heights give a trapezium, a fist gives a triangle; gain slides linearly between two edges |
+| A hand upside down                                  | That edge goes negative: bars hang from top and audio is phase-inverted. One flipped hand twists grid through zero                                                  |
+| Sweep both hands sideways, fast                     | Latch reverse / forward (pulling apart is ignored, only a pure sweep counts)                                                                                        |
+| Mean height of both hands (key `p`)                 | Pitch +-12 semitones (off by default)                                                                                                                               |
+| Pinch thumb and index together (either hand)        | **Freeze**: read head stops and grains keep playing from that spot with a little random spray, a sustained pad. Release to resume.                                  |
+| Turn the **left** palm edge-on to the camera (roll) | High-pass sweeps 20 Hz -> 1.2 kHz (thin out the bass)                                                                                                               |
+| Turn the **right** palm edge-on (roll)              | Low-pass sweeps 20 kHz -> 400 Hz (muffle the highs)                                                                                                                 |
 
 Grid is drawn from same numbers audio engine receives.
 White playhead shows where read head is inside current 4-second segment, i.e. where engine is sampling gain ramp.
@@ -40,6 +43,7 @@ There is no decorative waveform: every pixel is either grid or measured audio (s
 | `s`       | Segment length held between hands: 1 / 2 / 4 / 8 s         |
 | `v`       | Bars <-> mirrored bars                                     |
 | `p`       | Pitch from hand height on/off                              |
+| `e`       | Effects (pinch freeze + roll filters) on/off               |
 | `l`       | Low-light boost: auto -> on -> off                         |
 | `t`       | Temporal denoise (part of boost) on/off                    |
 | `r`       | Start / stop recording what you hear to `recordings/*.wav` |
@@ -57,6 +61,12 @@ There is no decorative waveform: every pixel is either grid or measured audio (s
   Plain `key = value` lines; bad values are ignored or clamped.
 - **Short drop-outs are bridged**: if tracker loses a hand for less than 0.4 s, grid and audio stay
   where they were instead of flickering; after that grid hides and next sighting snaps into place.
+
+The roll and pinch features are ratios against the hand's own palm length, so they do not depend on how
+far you are from the camera (measured on a real open hand: pinch ratio 1.47, palm-width ratio 0.69; a pinch
+is below 0.28, an edge-on palm about 0.1). Both are limited by 2-D landmarks: a hand turned *away* from the
+camera looks like a hand turned edge-on, so keep the palm roughly facing the camera when you do not want a filter.
+
 
 ## Build and run
 
@@ -82,12 +92,13 @@ make test-asan     # same under AddressSanitizer + UBSan
 
 | Test                | Checks                                                                                                                                                |
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test_audio_engine` | gain ramp 0->1 gets louder across segment, -1 is exact phase inverse of +1, stretch 2 halves head speed, reverse wraps backwards          |
-| `test_mapper`       | distance -> stretch, edge heights -> signed gains (rectangle, fist, upside-down, twist), single hand holds values, sweep vs stretch, calibrate, pitch |
-| `test_spectrum`     | a sine lands in right log-spaced bar, silence decays                                                                                              |
+| `test_audio_engine` | gain ramp 0->1 gets louder across segment, -1 is exact phase inverse of +1, stretch 2 halves head speed, reverse wraps backwards; freeze stops the head but not the sound; low-/high-pass remove the right tone |
+| `test_biquad`       | Butterworth low-/high-pass: flat pass band, -3 dB at cutoff, > 30 dB down 3 octaves away, stable while cutoff sweeps |
+| `test_mapper`       | distance -> stretch, edge heights -> signed gains (rectangle, fist, upside-down, twist), single hand holds values, sweep vs stretch, calibrate, pitch; pinch with hysteresis, roll -> cutoffs, effects off, no stuck freeze when a hand leaves |
+| `test_spectrum`     | a sine lands in right log-spaced bar, silence decays                                                                                                  |
 | `test_enhancer`     | dark frames get brighter, bright ones untouched, denoise lowers noise without smearing a moving block                                                 |
-| `test_grid`         | bars stay inside trapezium / triangle / inverted / twisted quad                                                                                   |
-| `test_recorder`     | recorded WAV equals what engine played, bit for bit; double start/stop and bad paths are safe                                                     |
+| `test_grid`         | bars stay inside trapezium / triangle / inverted / twisted quad                                                                                       |
+| `test_recorder`     | recorded WAV equals what engine played, bit for bit; double start/stop and bad paths are safe                                                         |
 | `test_settings`     | save/load round trip, clamping, garbage lines ignored                                                                                                 |
 | `test_tracker`      | models load on this OpenCV, no phantom hands on black or noise frames; if `tests/data/hand.jpg` exists a real hand must be found                      |
 
