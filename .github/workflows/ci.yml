@@ -119,12 +119,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: brew install cmake pkg-config opencv portaudio libsndfile
-      - name: Probe OpenCV objdetect headers # DEBUG:
+      - name: Probe OpenCV objdetect and xobjdetect headers # DEBUG:
         run: |
           brew --prefix opencv
           brew list --versions opencv
           ls "$(brew --prefix opencv)/include/opencv4/opencv2/objdetect"* 2>&1
           ls "$(brew --prefix opencv)/include/opencv4/opencv2/objdetect/" 2>&1
+          ls "$(brew --prefix opencv)/include/opencv4/opencv2/xobjdetect"* 2>&1
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - name: Build
