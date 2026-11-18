@@ -109,3 +109,43 @@ jobs:
           cmake --build build --target hand_probe -j"$(nproc)"
           rc=0; build/hand_probe /nonexistent.jpg || rc=$?
           test "$rc" -eq 1   # clean "cannot read" error (exit 1), not a crash
+
+  # macOS (Homebrew): code is POSIX + OpenCV + PortAudio + libsndfile only
+  # No -Werror here: Apple clang's warning set differs and new releases add warnings
+  macos:
+    name: build + test (macOS)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: brew install cmake pkg-config opencv portaudio libsndfile
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build -j"$(sysctl -n hw.ncpu)"
+      - name: Unit tests
+        run: cd build && ctest --output-on-failure
+
+  # .deb / .tar.gz packages build and check contents
+  package:
+    name: packages (.deb, .tar.gz)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $DEPS
+      - name: Build and package
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DAUDIOGESTURE_BUILD_TESTS=OFF
+          cmake --build build -j"$(nproc)"
+          cd build && cpack
+          dpkg -c audiogesture_*.deb | grep -q usr/bin/audiogesture
+          dpkg -I audiogesture_*.deb | grep -q "Depends:"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: |
+            build/*.deb
+            build/*.tar.gz
