@@ -35,41 +35,54 @@ Grid is drawn from same numbers audio engine receives.
 White playhead shows where read head is inside current 4-second segment, i.e. where engine is sampling gain ramp.
 There is no decorative waveform: every pixel is either grid or measured audio (spectrum of signal leaving speakers, so stretch/pitch/reverse show up).
 
+## Recording and replaying hands
+
+`--record-trace session.trace` saves the hand data of a session (landmark coordinates only, never camera images);
+`--replay session.trace` plays it back with no camera and no neural nets, driving the same mapper, audio, UI and OSC.
+Put short traces in `tests/data/` and `make test` checks the mapper's invariants on them from then on.
+
+## Install and packages
+
+`cmake --install build --prefix /usr/local` installs the binary plus `get_models.sh`; `cd build && cpack` writes a
+`.deb` (with dependencies filled in) and a `.tar.gz`. Models are downloaded, not shipped: run the installed
+`get_models.sh` and the app finds them in `<prefix>/share/audiogesture/models`.
+
 ## OSC output
+
 Sending **Open Sound Control** messages across a network using the **User Datagram Protocol** for real-time
 communication.
 `build/audiogesture song.wav --osc 9000` (or `--osc host:port`) publishes gestures as OSC over UDP, 30 times
 a second (Pure Data, Max, SuperCollider, TouchDesigner or a MIDI bridge can react to your hands):
 
-| Address                          | Value                                                    |
-| -------------------------------- | -------------------------------------------------------- |
-| `/audiogesture/speed`            | float, 1 = calibrated rest pose (below 1 = slower)       |
-| `/audiogesture/direction`        | float, +1 forward ... -1 reverse                         |
-| `/audiogesture/gain/left`, `/right` | float, signed edge gain, -1 .. +1 (negative = upside-down hand) |
-| `/audiogesture/pitch`            | float, semitones (0 unless pitch mode `p` is on)         |
-| `/audiogesture/freeze`           | int, 1 while a hand pinches                              |
-| `/audiogesture/lowpass`, `/highpass` | float, cut-off in Hz (20000 / 20 = open)             |
-| `/audiogesture/hands`            | int, hands tracked (0-2)                                 |
-| `/audiogesture/left`, `/right`   | float x, float y, palm centre 0..1 (only while tracked)  |
+| Address                              | Value                                                           |
+| ------------------------------------ | --------------------------------------------------------------- |
+| `/audiogesture/speed`                | float, 1 = calibrated rest pose (below 1 = slower)              |
+| `/audiogesture/direction`            | float, +1 forward ... -1 reverse                                |
+| `/audiogesture/gain/left`, `/right`  | float, signed edge gain, -1 .. +1 (negative = upside-down hand) |
+| `/audiogesture/pitch`                | float, semitones (0 unless pitch mode `p` is on)                |
+| `/audiogesture/freeze`               | int, 1 while a hand pinches                                     |
+| `/audiogesture/lowpass`, `/highpass` | float, cut-off in Hz (20000 / 20 = open)                        |
+| `/audiogesture/hands`                | int, hands tracked (0-2)                                        |
+| `/audiogesture/left`, `/right`       | float x, float y, palm centre 0..1 (only while tracked)         |
 
 MIDI is not built in; any OSC-to-MIDI bridge (for example `osc2midi` or a few lines in Pd) turns these into
 CCs.
 
 ## Keys
 
-| Key       | Action                                                     |
-| --------- | ---------------------------------------------------------- |
+| Key       | Action                                                                                                                                                               |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `c`       | Calibrate: hold both hands in your comfortable pose for 3 s (count restarts if a hand is lost); that pose becomes 1x speed and full amplitude. Press again to cancel |
-| `h` / `?` | Help overlay (gestures and keys). Opens by itself until you have calibrated once |
-| `s`       | Segment length held between hands: 1 / 2 / 4 / 8 s         |
-| `v`       | Bars <-> mirrored bars                                     |
-| `p`       | Pitch from hand height on/off                              |
-| `e`       | Effects (pinch freeze + roll filters) on/off               |
-| `l`       | Low-light boost: auto -> on -> off                         |
-| `t`       | Temporal denoise (part of boost) on/off                    |
-| `r`       | Start / stop recording what you hear to `recordings/*.wav` |
-| `d`       | Show tracker's search windows                              |
-| `q` / Esc | Quit                                                       |
+| `h` / `?` | Help overlay (gestures and keys). Opens by itself until you have calibrated once                                                                                     |
+| `s`       | Segment length held between hands: 1 / 2 / 4 / 8 s                                                                                                                   |
+| `v`       | Bars <-> mirrored bars                                                                                                                                               |
+| `p`       | Pitch from hand height on/off                                                                                                                                        |
+| `e`       | Effects (pinch freeze + roll filters) on/off                                                                                                                         |
+| `l`       | Low-light boost: auto -> on -> off                                                                                                                                   |
+| `t`       | Temporal denoise (part of boost) on/off                                                                                                                              |
+| `r`       | Start / stop recording what you hear to `recordings/*.wav`                                                                                                           |
+| `d`       | Show tracker's search windows                                                                                                                                        |
+| `q` / Esc | Quit                                                                                                                                                                 |
 
 ## Recording, settings, drop-outs
 
@@ -85,9 +98,8 @@ CCs.
 
 The roll and pinch features are ratios against the hand's own palm length, so they do not depend on how
 far you are from the camera (measured on a real open hand: pinch ratio 1.47, palm-width ratio 0.69; a pinch
-is below 0.28, an edge-on palm about 0.1). Both are limited by 2-D landmarks: a hand turned *away* from the
+is below 0.28, an edge-on palm about 0.1). Both are limited by 2-D landmarks: a hand turned _away_ from the
 camera looks like a hand turned edge-on, so keep the palm roughly facing the camera when you do not want a filter.
-
 
 ## Build and run
 
@@ -120,21 +132,23 @@ make test          # unit tests; test_tracker is skipped unless models are downl
 make test-asan     # same under AddressSanitizer + UBSan
 ```
 
-| Test                | Checks                                                                                                                                                |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test_audio_engine` | gain ramp 0->1 gets louder across segment, -1 is exact phase inverse of +1, stretch 2 halves head speed, reverse wraps backwards; freeze stops the head but not the sound; low-/high-pass remove the right tone |
-| `test_biquad`       | Butterworth low-/high-pass: flat pass band, -3 dB at cutoff, > 30 dB down 3 octaves away, stable while cutoff sweeps |
+| Test                | Checks                                                                                                                                                                                                                                         |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_audio_engine` | gain ramp 0->1 gets louder across segment, -1 is exact phase inverse of +1, stretch 2 halves head speed, reverse wraps backwards; freeze stops the head but not the sound; low-/high-pass remove the right tone                                |
+| `test_biquad`       | Butterworth low-/high-pass: flat pass band, -3 dB at cutoff, > 30 dB down 3 octaves away, stable while cutoff sweeps                                                                                                                           |
 | `test_mapper`       | distance -> stretch, edge heights -> signed gains (rectangle, fist, upside-down, twist), single hand holds values, sweep vs stretch, calibrate, pitch; pinch with hysteresis, roll -> cutoffs, effects off, no stuck freeze when a hand leaves |
-| `test_spectrum`     | a sine lands in right log-spaced bar, silence decays                                                                                                  |
-| `test_enhancer`     | dark frames get brighter, bright ones untouched, denoise lowers noise without smearing a moving block                                                 |
-| `test_handedness`   | learns the model's polarity from separated hands (both conventions), settles crossed hands and a lone hand on the far side, ignores unsure or contradictory votes |
-| `test_onboarding`   | calibration countdown (needs both hands, restarts, fires once), help text covers every key, overlays draw and survive tiny frames, file picker order zenity -> kdialog -> none |
-| `test_osc`          | OSC wire format byte by byte, per-frame message set, `--osc` target parsing, real UDP round trip on loopback |
-| `test_threaded`     | newest-wins hand-over between tracking and UI threads, frame/state stay paired, end of stream, clean shutdown (also run under TSan in CI) |
-| `test_grid`         | bars stay inside trapezium / triangle / inverted / twisted quad                                                                                       |
-| `test_recorder`     | recorded WAV equals what engine played, bit for bit; double start/stop and bad paths are safe                                                         |
-| `test_settings`     | save/load round trip, clamping, garbage lines ignored                                                                                                 |
-| `test_tracker`      | models load on this OpenCV, no phantom hands on black or noise frames; if `tests/data/hand.jpg` exists a real hand must be found                      |
+| `test_spectrum`     | a sine lands in right log-spaced bar, silence decays                                                                                                                                                                                           |
+| `test_enhancer`     | dark frames get brighter, bright ones untouched, denoise lowers noise without smearing a moving block                                                                                                                                          |
+| `test_handedness`   | learns the model's polarity from separated hands (both conventions), settles crossed hands and a lone hand on the far side, ignores unsure or contradictory votes                                                                              |
+| `test_onboarding`   | calibration countdown (needs both hands, restarts, fires once), help text covers every key, overlays draw and survive tiny frames, file picker order zenity -> kdialog -> none                                                                 |
+| `test_osc`          | OSC wire format byte by byte, per-frame message set, `--osc` target parsing, real UDP round trip on loopback                                                                                                                                   |
+| `test_trace`        | hand-trace record/replay round trip, malformed lines skipped, real-time pacing; mapper invariants on a scripted pull-together, 20 fuzzed sessions (dropouts, pinches, upside-down hands) and every `tests/data/*.trace`                        |
+| `test_latency`      | engine uses well under 50 % of the callback budget (prints the real figure), a gain gesture is audible within 150 ms but smoothed, hand data reaches the UI within a few ms                                                                    |
+| `test_threaded`     | newest-wins hand-over between tracking and UI threads, frame/state stay paired, end of stream, clean shutdown (also run under TSan in CI)                                                                                                      |
+| `test_grid`         | bars stay inside trapezium / triangle / inverted / twisted quad                                                                                                                                                                                |
+| `test_recorder`     | recorded WAV equals what engine played, bit for bit; double start/stop and bad paths are safe                                                                                                                                                  |
+| `test_settings`     | save/load round trip, clamping, garbage lines ignored                                                                                                                                                                                          |
+| `test_tracker`      | models load on this OpenCV, no phantom hands on black or noise frames; if `tests/data/hand.jpg` exists a real hand must be found                                                                                                               |
 
 ## How tracker works
 

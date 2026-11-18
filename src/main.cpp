@@ -26,6 +26,7 @@
 #include "audiogesture/ui/Onboarding.h"
 #include "audiogesture/ui/SpectrumGrid.h"
 #include "audiogesture/vision/GestureTracker.h"
+#include "audiogesture/vision/HandTrace.h"
 #include "audiogesture/vision/HandTracker.h"
 #include "audiogesture/vision/LowLightEnhancer.h"
 #include "audiogesture/vision/ThreadedSource.h"
@@ -36,18 +37,20 @@ struct Args {
   std::string audio;
   std::string source = "0"; // Camera index, or a video file (handy for testing without a webcam)
   std::string modelsDir;
-  bool skin = false;    // Force old skin-colour tracker
-  std::string osc;      // "host:port" to publish gesture data over OSC/UDP
-  bool sync = false;    // Track on UI thread (debugging) instead of a worker thread
-  std::string record;   // Start recording to this WAV immediately (also: key r)
-  std::string snapshot; // Headless smoke test: save view after ~40 frames and exit
+  bool skin = false;       // Force old skin-colour tracker
+  std::string replay;      // play back a recorded hand trace instead of using a camera
+  std::string recordTrace; // save hand data of this session to a trace file
+  std::string osc;         // "host:port" to publish gesture data over OSC/UDP
+  bool sync = false;       // Track on UI thread (debugging) instead of a worker thread
+  std::string record;      // Start recording to this WAV immediately (also: key r)
+  std::string snapshot;    // Headless smoke test: save view after ~40 frames and exit
 };
 
 void usage(const char *exe) {
   std::fprintf(stderr,
                "usage: %s [audio.wav|flac|ogg|mp3] [camera_index | video_file] "
-               "[--models DIR] [--skin] [--sync] [--osc [host:]port] [--snapshot out.png] "
-               "[--record out.wav]\n"
+               "[--models DIR] [--skin] [--sync] [--osc [host:]port] [--record-trace f.trace | "
+               "--replay f.trace] [--snapshot out.png] [--record out.wav]\n"
                "  keys: l low-light boost (auto/on/off)   v bars/mirrored   d show tracking ROI"
                "   c calibrate pose\n"
                "  h help   p pitch on/off   e effects on/off   s segment length   t temporal "
@@ -66,6 +69,10 @@ bool parseArgs(int argc, char **argv, Args &a) {
     const std::string s = argv[i];
     if (s == "--skin") {
       a.skin = true;
+    } else if (s == "--replay" && i + 1 < argc) {
+      a.replay = argv[++i];
+    } else if (s == "--record-trace" && i + 1 < argc) {
+      a.recordTrace = argv[++i];
     } else if (s == "--osc" && i + 1 < argc) {
       a.osc = argv[++i];
     } else if (s == "--sync") {
@@ -169,7 +176,16 @@ int main(int argc, char **argv) {
   std::unique_ptr<IHandSource> src;
   CameraHandSource *dnn = nullptr; // Non-null when landmark tracker is in use
   const bool fromFile = !isNumber(args.source);
-  if (!args.skin) {
+  if (!args.replay.empty()) { // Recorded hands: no camera, no neural nets
+    std::vector<TraceFrame> frames;
+    if (!loadTrace(args.replay, frames) || frames.empty()) {
+      std::fprintf(stderr, "cannot read hand trace '%s'\n", args.replay.c_str());
+      return 1;
+    }
+    std::printf("replaying %zu frames from %s\n", frames.size(), args.replay.c_str());
+    src = std::make_unique<ReplaySource>(std::move(frames));
+  }
+  if (!src && !args.skin) {
     const std::string dir = findModelsDir(args.modelsDir);
     HandTrackerConfig cfg;
     cfg.palmModel = dir + "/" + kPalmModelFile;
@@ -238,6 +254,16 @@ int main(int argc, char **argv) {
 
   double oscClock = 0;
 
+  TraceWriter trace;
+  if (!args.recordTrace.empty()) {
+    if (!trace.open(args.recordTrace)) {
+      std::fprintf(stderr, "cannot write trace '%s'\n", args.recordTrace.c_str());
+      return 1;
+    }
+    std::printf("recording hand trace to %s\n", args.recordTrace.c_str());
+  }
+  const auto startTime = std::chrono::steady_clock::now();
+
   GestureMapper mapper;
   SpectrumAnalyzer analyzer;
   SpectrumGrid grid;
@@ -286,6 +312,10 @@ int main(int argc, char **argv) {
     const double dt = std::chrono::duration<double>(now - last).count();
     last = now;
     fps = (fps == 0) ? 1.0 / std::max(dt, 1e-3) : 0.9 * fps + 0.1 / std::max(dt, 1e-3);
+
+    if (trace.isOpen()) {
+      trace.write(std::chrono::duration<double>(now - startTime).count(), hands);
+    }
 
     audio.setParams(mapper.update(hands, dt));
     if (osc.isOpen() && (oscClock += dt) >= 1.0 / 30.0) { // 30 messages-sets per second is plenty
