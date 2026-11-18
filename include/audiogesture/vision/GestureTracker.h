@@ -1,12 +1,17 @@
 #pragma once
 #include <array>
+#include <memory>
 #include <opencv2/core.hpp>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/core/types.hpp>
-#include <opencv2/objdetect.hpp>
+// #include <opencv2/objdetect.hpp>
 #include <opencv2/opencv.hpp>
 #include <opencv2/videoio.hpp>
 #include <vector>
+
+namespace cv {
+class CascadeClassifier;
+}
 
 constexpr int kNumLandmarks = 21; // MediaPipe hand model: 0 wrist, 1-4 thumb, 5-8 index,
                                   // 9-12 middle, 13-16 ring, 17-20 pinky
@@ -15,14 +20,16 @@ constexpr int kNumLandmarks = 21; // MediaPipe hand model: 0 wrist, 1-4 thumb, 5
 // hand as seen on screen
 struct Hand {
   bool valid = false;
-  float x = 0.5f, y = 0.5f; // Palm centre
+  float x = 0.5f; // Palm centre x-co-ordinate
+  float y = 0.5f; // Palm centre y-co-ordinate
 
   // Filled only by landmark tracker (HandTracker.h):
   bool hasSkeleton = false;
   float score = 0.f;                           // Landmark-model "hand present" confidence, 0..1
   std::array<cv::Point2f, kNumLandmarks> lm{}; // Normalized image coords (smoothed)
   cv::Point2f roiCenter{0.f, 0.f};             // Tracking ROI, in pixels (debug overlay)
-  float roiSize = 0.f, roiAngle = 0.f;
+  float roiSize = 0.f;
+  float roiAngle = 0.f;
 };
 
 struct HandState {
@@ -44,14 +51,16 @@ public:
 class SkinHandTracker : public IHandSource {
 public:
   explicit SkinHandTracker(int camIndex = 0, int w = 640, int h = 480);
+  ~SkinHandTracker() override;
   bool isOpen() const { return cap_.isOpened(); }
   bool poll(HandState &out) override;
-  const cv::Mat &frame() const override { return frame_; } // Mirrored frame with debug contours
+  const cv::Mat &frame() const override { return frame_; } // mirrored frame with debug contours
 
 private:
   cv::VideoCapture cap_;
-  cv::Mat frame_, mask_;
-  cv::CascadeClassifier face_;
+  cv::Mat frame_;
+  cv::Mat mask_;
+  std::unique_ptr<cv::CascadeClassifier> face_;
   bool haveFace_ = false;
   std::vector<cv::Rect> faces_;
   int frameNo_ = 0;
