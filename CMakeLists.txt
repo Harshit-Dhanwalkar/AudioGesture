@@ -60,3 +60,22 @@ if(AUDIOGESTURE_BUILD_TESTS)
   # when they are absent, which ctest shows as skipped, not failed
   set_tests_properties(test_tracker PROPERTIES SKIP_RETURN_CODE 77 LABELS models)
 endif()
+
+# Install + packages:  cmake --install build --prefix /usr/local
+#                      cd build && cpack          (writes a .deb and a .tar.gz)
+# ONNX models are downloaded, not shipped; installed get_models.sh puts them in
+# <prefix>/share/audiogesture/models, one of places app looks
+include(GNUInstallDirs)
+install(TARGETS audiogesture RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(PROGRAMS models/get_models.sh DESTINATION ${CMAKE_INSTALL_DATADIR}/audiogesture)
+install(FILES models/make_opencv_compat.py README.md DESTINATION ${CMAKE_INSTALL_DATADIR}/audiogesture)
+
+set(CPACK_PACKAGE_NAME "audiogesture")
+set(CPACK_PACKAGE_VERSION "0.1.0")
+set(CPACK_PACKAGE_CONTACT "Harshit Dhanwalkar")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Shape audio with your hands: webcam hand tracking drives a live granular player")
+set(CPACK_GENERATOR "DEB;TGZ")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+set(CPACK_DEBIAN_PACKAGE_SECTION "sound")
+include(CPack)
