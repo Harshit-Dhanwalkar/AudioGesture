@@ -114,7 +114,7 @@ jobs:
   # No -Werror here: Apple clang's warning set differs and new releases add warnings
   macos:
     name: build + test (macOS)
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies

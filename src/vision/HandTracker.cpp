@@ -103,8 +103,8 @@ inline cv::Point2f upVec(float angle) { return {std::sin(angle), -std::cos(angle
 
 inline cv::Point2f rightVec(float angle) { return {std::cos(angle), std::sin(angle)}; }
 
-// Rotation that makes vector wrist->middle-finger point "up" in crop angle = \atan2(dx, -dy): 0
-// when fingers point up image, +90deg when they point right
+// Rotation that makes vector wrist->middle-finger point "up" in crop angle = \atan2(dx, -dy):
+// Return 0 when fingers point up image, +90deg when they point right
 inline float handAngle(cv::Point2f wrist, cv::Point2f middle) {
   return std::atan2(middle.x - wrist.x, -(middle.y - wrist.y));
 }
@@ -129,6 +129,7 @@ std::string findModelsDir(const std::string &hint) {
     const std::string dir = exe.substr(0, exe.find_last_of('/'));
     cands.push_back(dir + "/../models");
     cands.push_back(dir + "/models");
+    cands.push_back(dir + "/../share/audiogesture/models"); // Installed layout
   }
 
   for (const auto &c : cands) {

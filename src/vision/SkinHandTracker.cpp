@@ -2,29 +2,38 @@
 
 #include <algorithm>
 #include <iostream>
+#include <opencv2/core.hpp>
+#include <opencv2/core/mat.hpp>
+#include <opencv2/core/types.hpp>
+#include <opencv2/imgproc.hpp>
+// #include <opencv2/objdetect.hpp>
+#include <opencv2/xobjdetect.hpp>
 #include <string>
 
-SkinHandTracker::SkinHandTracker(int camIndex, int w, int h) : cap_(camIndex) {
+SkinHandTracker::SkinHandTracker(int camIndex, int w, int h)
+    : cap_(camIndex), face_(std::make_unique<cv::CascadeClassifier>()) {
   cap_.set(cv::CAP_PROP_FRAME_WIDTH, w);
   cap_.set(cv::CAP_PROP_FRAME_HEIGHT, h);
-  for (const char *p :
-       {"haarcascade_frontalface_default.xml",
-        "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml",
-        "/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml"}) {
-    if (face_.load(p)) {
+  for (const char *p : {"haarcascade_frontalface_default.xml",
+                        "/usr/share/opencv4/haarcascades/haarcascade_frontalface_default.xml",
+                        "/usr/share/opencv/haarcascades/haarcascade_frontalface_default.xml"}) {
+    if (face_->load(p)) {
       haveFace_ = true;
       break;
     }
   }
 }
 
+SkinHandTracker::~SkinHandTracker() = default;
+
 bool SkinHandTracker::poll(HandState &out) {
   cv::Mat raw;
   if (!cap_.read(raw) || raw.empty()) {
     return false;
   }
-  cv::flip(raw, frame_,
-           1); // mirror so moving your right hand moves right on screen
+
+  // Mirror so moving user's right hand moves right on screen
+  cv::flip(raw, frame_, 1);
 
   // Skin segmentation in YCrCb (more lighting-robust than RGB)
   cv::Mat ycrcb;
@@ -35,23 +44,24 @@ bool SkinHandTracker::poll(HandState &out) {
   if (haveFace_ && (frameNo_++ % 10 == 0)) {
     cv::Mat gray;
     cv::cvtColor(frame_, gray, cv::COLOR_BGR2GRAY);
-    face_.detectMultiScale(gray, faces_, 1.2, 5, 0, cv::Size(80, 80));
+    face_->detectMultiScale(gray, faces_, 1.2, 5, 0, cv::Size(80, 80));
   }
 
   const cv::Rect bounds(0, 0, frame_.cols, frame_.rows);
   for (const auto &f : faces_) {
-    cv::Rect r(f.x - f.width * 3 / 10, f.y - f.height * 4 / 10,
-               f.width * 16 / 10, f.height * 26 / 10);
+    cv::Rect r(f.x - f.width * 3 / 10, f.y - f.height * 4 / 10, f.width * 16 / 10,
+               f.height * 26 / 10);
     cv::rectangle(mask_, r & bounds, cv::Scalar(0), cv::FILLED);
   }
 
-  // Clean up the mask
+  // Clean up mask
   cv::medianBlur(mask_, mask_, 5);
   cv::Mat k = cv::getStructuringElement(cv::MORPH_ELLIPSE, {7, 7});
   cv::morphologyEx(mask_, mask_, cv::MORPH_OPEN, k);
   cv::dilate(mask_, mask_, k);
 
-  // Two largest blobs = hands. Centroid via image moments
+  // Two largest blobs = hands
+  // Centroid via image moments
   std::vector<std::vector<cv::Point>> contours;
   cv::findContours(mask_, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
   const double minArea = 0.005 * frame_.cols * frame_.rows;
@@ -71,8 +81,7 @@ bool SkinHandTracker::poll(HandState &out) {
     cv::polylines(frame_, c, true, cv::Scalar(0, 255, 0), 1);
   }
 
-  std::sort(blobs.begin(), blobs.end(),
-            [](auto &a, auto &b) { return a.first > b.first; });
+  std::sort(blobs.begin(), blobs.end(), [](auto &a, auto &b) { return a.first > b.first; });
   if (blobs.size() > 2) {
     blobs.resize(2);
   }
@@ -95,8 +104,7 @@ bool SkinHandTracker::poll(HandState &out) {
     out.left = norm(a);
     out.right = norm(b);
   } else if (blobs.size() == 1) {
-    out.right =
-        norm(blobs[0].second); // single hand drives pitch + direction only
+    out.right = norm(blobs[0].second); // Single hand drives pitch + direction only
   }
 
   return true;
