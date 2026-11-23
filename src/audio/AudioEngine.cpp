@@ -140,6 +140,8 @@ void AudioEngine::setParams(const EngineParams &p) {
   tInvert_.store(clampf(p.invert, -1.f, 1.f), std::memory_order_relaxed);
   tFreeze_.store(p.freeze ? 1.f : 0.f, std::memory_order_relaxed);
   tWsola_.store(p.wsola, std::memory_order_relaxed);
+  tPanOn_.store(p.panOn, std::memory_order_relaxed);
+  tPan_.store(clampf(p.pan, -1.f, 1.f), std::memory_order_relaxed);
   tLp_.store(std::log2(clampf(p.lpHz, 40.f, 20000.f)), std::memory_order_relaxed);
   tHp_.store(std::log2(clampf(p.hpHz, 10.f, 8000.f)), std::memory_order_relaxed);
   tEnvL_.store(clampf(p.envL, -1.f, 1.f), std::memory_order_relaxed);
@@ -268,6 +270,8 @@ void AudioEngine::render(float *out, unsigned long frames) {
   const float tI = tInvert_.load(std::memory_order_relaxed);
   const float tFz = tFreeze_.load(std::memory_order_relaxed);
   wsolaOn_ = tWsola_.load(std::memory_order_relaxed);
+  panOn_ = tPanOn_.load(std::memory_order_relaxed);
+  const float tPan = tPan_.load(std::memory_order_relaxed);
   const float tLp = tLp_.load(std::memory_order_relaxed);
   const float tHp = tHp_.load(std::memory_order_relaxed);
   const float tEL = tEnvL_.load(std::memory_order_relaxed);
@@ -296,6 +300,7 @@ void AudioEngine::render(float *out, unsigned long frames) {
     hpLog_ += static_cast<float>(aSlow_) * (tHp - hpLog_);
     envL_ += static_cast<float>(aFast_) * (tEL - envL_);
     envR_ += static_cast<float>(aFast_) * (tER - envR_);
+    pan_ += static_cast<float>(aFast_) * (tPan - pan_);
 
     // Pitch in semitones -> playback-rate ratio: rate = 2^(semitones / 12)
     // +12 st = 2x rate (octave up), -12 st = 0.5x (octave down)
@@ -364,6 +369,19 @@ void AudioEngine::render(float *out, unsigned long frames) {
       }
       oL = hp_[0].process(lp_[0].process(oL));
       oR = hp_[1].process(lp_[1].process(oR));
+    }
+    // Equal-power balance. Gated by panOn_, not by how close pan_ is to zero: once engaged it
+    // applies uniformly, including at pan_ == 0 (-3 dB each channel; disengaged is a true bypass
+    // (unity gain both channels)
+    // Angle sweeps 0..pi/2 as pan_ goes -1..+1, so gainL^2 + gainR^2 == 1 throughout
+    // Each channel scales its own content, so mono sources (common case: R falls back to same
+    // samples as L) pan cleanly across field; a stereo file narrows a little toward whichever side
+    // it is pushed to, same as a mixing desk's balance control
+    if (panOn_) {
+      const float ang = (pan_ + 1.f) * 0.125f * kTwoPi; // 0..pi/2 as pan_ goes -1..+1
+      const float gL = std::cos(ang), gR = std::sin(ang);
+      oL *= gL;
+      oR *= gR;
     }
     out[2 * i] = oL;
     out[2 * i + 1] = oR;

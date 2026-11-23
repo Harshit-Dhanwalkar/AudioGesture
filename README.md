@@ -89,6 +89,7 @@ CCs.
 | `p`       | Pitch from hand height on/off                                                                                                                                        |
 | `e`       | Effects (pinch freeze + roll filters) on/off                                                                                                                         |
 | `w`       | Phase-aligned grains (WSOLA) on/off, for A/B listening      |
+| `x`       | Stereo pan from hands' horizontal centre, on/off                                                                                                                     |
 | `l`       | Low-light boost: auto -> on -> off                                                                                                                                   |
 | `t`       | Temporal denoise (part of boost) on/off                                                                                                                              |
 | `r`       | Start / stop recording what you hear to `recordings/*.wav`                                                                                                           |
@@ -155,6 +156,7 @@ make test-asan     # same under AddressSanitizer + UBSan
 | `test_osc`          | OSC wire format byte by byte, per-frame message set, `--osc` target parsing, real UDP round trip on loopback                                                                                                                                   |
 | `test_trace`        | hand-trace record/replay round trip, malformed lines skipped, real-time pacing; mapper invariants on a scripted pull-together, 20 fuzzed sessions (dropouts, pinches, upside-down hands) and every `tests/data/*.trace`                        |
 | `test_stretch`      | time-stretch steadiness: level flutter of stretched tones/voiced signal with WSOLA vs plain overlap-add, level preserved, reverse and pitch shift, silence stays silent |
+| `test_pan`          | equal-power pan law (gainL^2+gainR^2 == 1, centre = unity, hard left/right silences the other channel), hands' horizontal centre maps to pan, dead zone, pan off keeps centre, held while a hand is lost                                        |
 | `test_latency`      | engine uses well under 50 % of the callback budget (prints the real figure), a gain gesture is audible within 150 ms but smoothed, hand data reaches the UI within a few ms                                                                    |
 | `test_threaded`     | newest-wins hand-over between tracking and UI threads, frame/state stay paired, end of stream, clean shutdown (also run under TSan in CI)                                                                                                      |
 | `test_grid`         | bars stay inside trapezium / triangle / inverted / twisted quad                                                                                                                                                                                |

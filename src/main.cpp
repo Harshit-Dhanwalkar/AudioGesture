@@ -38,8 +38,8 @@ struct Args {
   std::string source = "0"; // Camera index, or a video file (handy for testing without a webcam)
   std::string modelsDir;
   bool skin = false;       // Force old skin-colour tracker
-  std::string replay;      // play back a recorded hand trace instead of using a camera
-  std::string recordTrace; // save hand data of this session to a trace file
+  std::string replay;      // Play back a recorded hand trace instead of using a camera
+  std::string recordTrace; // Save hand data of this session to a trace file
   std::string osc;         // "host:port" to publish gesture data over OSC/UDP
   bool sync = false;       // Track on UI thread (debugging) instead of a worker thread
   std::string record;      // Start recording to this WAV immediately (also: key r)
@@ -53,7 +53,8 @@ void usage(const char *exe) {
                "--replay f.trace] [--snapshot out.png] [--record out.wav]\n"
                "  keys: l low-light boost (auto/on/off)   v bars/mirrored   d show tracking ROI"
                "   c calibrate pose\n"
-               "  h help   p pitch on/off   e effects on/off   w phase-aligned grains   s segment length   t temporal denoise   r record WAV   q/Esc quit\n",
+               "  h help   p pitch on/off   e effects on/off   w phase-aligned grains   x pan "
+               "on/off   s segment length   t temporal denoise   r record WAV   q/Esc quit\n",
                exe);
 }
 
@@ -128,7 +129,7 @@ void drawHud(cv::Mat &view, const GestureMapper &mapper, const HandState &hands,
   }
 }
 
-// recordings/audiogesture-YYYYmmdd-HHMMSS.wav (directory is created)
+// Recordings/audiogesture-YYYYmmdd-HHMMSS.wav (directory is created)
 std::string newRecordingPath() {
   std::filesystem::create_directories("recordings");
   char name[64];
@@ -406,6 +407,9 @@ int main(int argc, char **argv) {
     }
     if (k == 'w') {
       mapper.wsolaOn = !mapper.wsolaOn; // Phase-aligned grains on/off (A/B listening)
+    }
+    if (k == 'x') {
+      mapper.panOn = !mapper.panOn; // Stereo pan from hands' horizontal centre
     }
     if (k == 's') {
       mapper.cycleSegment();

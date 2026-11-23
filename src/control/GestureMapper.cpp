@@ -68,6 +68,8 @@ void GestureMapper::features(const Hand &h, float aspect, float a, bool &pinched
 // Right hand: low-pass 20 kHz -> 400 Hz
 // Log-spaced, because pitch perception is
 void GestureMapper::applyEffects() {
+  p_.wsola = wsolaOn;
+  p_.panOn = panOn;
   if (!effectsOn) {
     p_.freeze = false;
     p_.lpHz = 20000.f;
@@ -104,7 +106,7 @@ const EngineParams &GestureMapper::update(const HandState &hs, double dt) {
 
   const bool both = L_.init && R_.init;
   if (!L_.init) {
-    pinchL_ = false; // a hand that is gone cannot keep sound frozen or filtered
+    pinchL_ = false; // Hand that is gone cannot keep sound frozen or filtered
     openL_ = 1.f;
   }
   if (!R_.init) {
@@ -114,6 +116,9 @@ const EngineParams &GestureMapper::update(const HandState &hs, double dt) {
 
   if (!both) {
     applyEffects();
+    if (!panOn) {
+      p_.pan = 0.f;
+    } // else: hold last pan
 
     // Hold last parameters while a hand is missing
     cInit_ = false;
@@ -153,6 +158,7 @@ const EngineParams &GestureMapper::update(const HandState &hs, double dt) {
   // pulling hands apart moves centroid at half rate of vS, so requiring |vC| > |vS| rejects
   // stretching and only pure sweeps count
   const float cx = 0.5f * (L_.x + R_.x);
+  p_.pan = panOn ? std::clamp((cx - 0.5f) * 2.4f, -1.f, 1.f) : 0.f;
   if (cInit_) {
     const float k = 1.f - std::exp(-float(dt) / 0.06f);
     vc_ += k * ((cx - cxPrev_) / float(dt) - vc_);
@@ -204,6 +210,10 @@ std::string GestureMapper::status() const {
   }
   if (p_.hpHz > 30.f) {
     std::snprintf(buf, sizeof buf, " | HP %.0f", p_.hpHz);
+    out += buf;
+  }
+  if (std::fabs(p_.pan) > 0.02f) {
+    std::snprintf(buf, sizeof buf, " | pan %+.2f", p_.pan);
     out += buf;
   }
 

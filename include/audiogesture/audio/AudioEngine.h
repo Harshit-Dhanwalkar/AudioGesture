@@ -41,6 +41,15 @@ struct EngineParams {
   // random spray so it sounds like a pad, not a buzz)
   bool freeze = false;
 
+  // Stereo placement, equal-power law: -1 full left, 0 centre, +1 full right.
+  // Applied after everything else (filters, invert), so it only moves the
+  // existing mix in the stereo field rather than changing what is played.
+  // panOn gates the whole stage: false bypasses it (unity gain both channels,
+  // matching the engine before this existed); true applies the law, which
+  // means even `pan == 0` costs the standard equal-power -3 dB on each side.
+  bool panOn = true;
+  float pan = 0.f;
+
   // Waveform-similarity grain placement (WSOLA)
   // Each new grain starts where read head is, nudged by up to ~15 ms to spot whose waveform best
   // continues previous grain, so overlapping grains add up in phase instead of at random
@@ -139,7 +148,9 @@ private:
   std::atomic<float> tFreeze_{0.f};
   std::atomic<float> tLp_{14.287f};
   std::atomic<float> tHp_{4.322f}; // tLp_/tHp_ hold log2(cutoff Hz)
-  std::atomic<bool>  tWsola_{true};
+  std::atomic<bool> tWsola_{true};
+  std::atomic<bool> tPanOn_{true};
+  std::atomic<float> tPan_{0.f};
   std::atomic<double> headNorm_{0.0};
   std::atomic<float> segPhase_{0.f};
 
@@ -158,6 +169,7 @@ private:
   float gain_ = 0.8f;
   float invert_ = 1.f;
   float envL_ = 1.f;
+  float pan_ = 0.f; // Smoothed; equal-power gains derived from it each sample
   float envR_ = 1.f;
   double head_ = 0.0;
   int countdown_ = 0;
@@ -172,6 +184,7 @@ private:
   // WSOLA state (audio thread only): where previous grain started and its direction
   bool wsolaOn_ = true;
   bool havePrev_ = false;
+  bool panOn_ = true;
   double prevStart_ = 0.0;
   double prevSign_ = 1.0;
   double wsolaOffset(double nominal, double sign, double rate, int hop) const;

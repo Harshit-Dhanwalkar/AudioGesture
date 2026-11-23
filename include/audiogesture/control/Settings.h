@@ -20,6 +20,7 @@ struct Settings {
   bool temporalDenoise = true;
   int boostMode = 0; // Low-light boost: 0 auto, 1 on, 2 off
   int gridStyle = 0; // 0 bars, 1 mirrored
+  bool pan = true;         // Stereo pan from hands' horizontal centre (key x)
 
   void clamp();
 

@@ -248,5 +248,44 @@ int main() {
     CHECK(!m.frozen());
   }
 
+  // pan: hands' horizontal centre drives stereo pan; off keeps centre; held when a hand leaves
+  {
+    GestureMapper m;
+    hs.left = mk(0.5f, 0.9f, 0.45f);
+    hs.right = mk(0.5f, 0.9f, 0.45f); // Centred: pan 0
+    settle(m, hs);
+    CHECK_NEAR(m.params().pan, 0.0, 0.02);
+
+    hs.left = mk(0.05f, 0.9f, 0.45f);
+    hs.right = mk(0.25f, 0.9f, 0.45f); // Both hands well left of centre
+    settle(m, hs);
+    CHECK(m.params().pan < -0.5f);
+
+    hs.left = mk(0.75f, 0.9f, 0.45f);
+    hs.right = mk(0.95f, 0.9f, 0.45f); // Both well right
+    settle(m, hs);
+    CHECK(m.params().pan > 0.5f);
+
+    // Hard left/right clamps at edge of pose, does not overshoot
+    CHECK(m.params().pan <= 1.0f);
+
+    // Off: centre regardless of hand position
+    m.panOn = false;
+    settle(m, hs); // Still "well right" pose from above
+    CHECK_NEAR(m.params().pan, 0.0, 1e-6);
+    m.panOn = true;
+
+    // A hand leaving holds last pan rather than snapping to centre
+    hs.left = mk(0.75f, 0.9f, 0.45f);
+    hs.right = mk(0.95f, 0.9f, 0.45f);
+    settle(m, hs);
+    const float held = m.params().pan;
+    CHECK(held > 0.5f);
+    HandState oneGone = hs;
+    oneGone.right = Hand{};
+    m.update(oneGone, 1.0 / 30.0);
+    CHECK_NEAR(m.params().pan, held, 1e-6);
+  }
+
   TEST_MAIN_END();
 }
