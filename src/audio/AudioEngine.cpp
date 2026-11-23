@@ -15,20 +15,23 @@ inline float clampf(float v, float lo, float hi) {
 } // namespace
 
 AudioEngine::AudioEngine() : ring_(new std::atomic<float>[kRing]) {
-  for (size_t i = 0; i < kRing; ++i)
+  for (size_t i = 0; i < kRing; ++i) {
     ring_[i].store(0.f, std::memory_order_relaxed);
+  }
 }
 
 void AudioEngine::copyRecent(float *dst, size_t n) const {
   n = std::min(n, kRing);
   const uint64_t end = ringPos_.load(std::memory_order_acquire);
-  for (size_t i = 0; i < n; ++i)
+  for (size_t i = 0; i < n; ++i) {
     dst[i] = ring_[(end - n + i) & (kRing - 1)].load(std::memory_order_relaxed);
+  }
 }
 AudioEngine::~AudioEngine() {
   stop();
-  if (paInit_)
+  if (paInit_) {
     Pa_Terminate();
+  }
 }
 
 bool AudioEngine::load(const std::string &path) {
@@ -136,6 +139,7 @@ void AudioEngine::setParams(const EngineParams &p) {
   tGain_.store(clampf(p.gain, 0.f, 1.f), std::memory_order_relaxed);
   tInvert_.store(clampf(p.invert, -1.f, 1.f), std::memory_order_relaxed);
   tFreeze_.store(p.freeze ? 1.f : 0.f, std::memory_order_relaxed);
+  tWsola_.store(p.wsola, std::memory_order_relaxed);
   tLp_.store(std::log2(clampf(p.lpHz, 40.f, 20000.f)), std::memory_order_relaxed);
   tHp_.store(std::log2(clampf(p.hpHz, 10.f, 8000.f)), std::memory_order_relaxed);
   tEnvL_.store(clampf(p.envL, -1.f, 1.f), std::memory_order_relaxed);
@@ -147,6 +151,61 @@ int AudioEngine::paCallback(const void *, void *out, unsigned long frames,
                             const PaStreamCallbackTimeInfo *, PaStreamCallbackFlags, void *user) {
   static_cast<AudioEngine *>(user)->render(static_cast<float *>(out), frames);
   return paContinue;
+}
+
+// Offset (source samples) to add to `nominal` so a grain starting there continues previous grain's
+// waveform
+// Previous grain, `hop` output samples after its own start, is at prevStart_ + sign*hop*rate and
+// keeps playing; new grain's opening stretch should look like that
+// Normalised cross-correlation on left channel, coarse then fine, bounded cost: ~150k multiply-adds
+// per grain (one grain per ~60 ms)
+double AudioEngine::wsolaOffset(double nominal, double sign, double rate, int hop) const {
+  const long N = static_cast<long>(left_.size());
+  const long tol = std::max(8L, static_cast<long>(0.015 * fileSR_));      // +-15 ms
+  const long M = std::min<long>(hop, static_cast<long>(0.030 * fileSR_)); // Compare 30 ms
+  auto at = [&](double p) {
+    long i = static_cast<long>(std::floor(p)) % N;
+    return left_[static_cast<size_t>(i < 0 ? i + N : i)];
+  };
+
+  // Reference: what previous grain is about to play over overlap
+  const double refBase = prevStart_ + sign * hop * rate;
+  auto score = [&](long d, long step) {
+    double xy = 0, xx = 0, yy = 0;
+    for (long k = 0; k < M; k += step) {
+      const float r = at(refBase + sign * k * rate);
+      const float c = at(nominal + d + sign * k * rate);
+      xy += double(r) * c;
+      xx += double(c) * c;
+      yy += double(r) * r;
+    }
+    const double den = std::sqrt(xx * yy) + 1e-9;
+    // Tiny bias towards nominal position so silence / ties do not wander
+    return xy / den - 1e-3 * std::abs(double(d)) / double(tol);
+  };
+
+  long best = 0;
+  double bestScore = -2;
+  for (long d = -tol; d <= tol; d += 4) { // Coarse: every 4th lag, every 4th sample
+    const double sc = score(d, 4);
+    if (sc > bestScore) {
+      bestScore = sc;
+      best = d;
+    }
+  }
+  const long lo = best - 4, hi = best + 4;
+  for (long d = lo; d <= hi; ++d) { // fine: every lag around it, every 2nd sample
+    if (d < -tol || d > tol) {
+      continue;
+    }
+    const double sc = score(d, 2);
+    if (sc > bestScore) {
+      bestScore = sc;
+      best = d;
+    }
+  }
+
+  return static_cast<double>(best);
 }
 
 void AudioEngine::spawnGrain() {
@@ -173,8 +232,17 @@ void AudioEngine::spawnGrain() {
     const double n = static_cast<double>(left_.size());
     start = std::fmod(std::fmod(start, n) + n, n);
   }
+  const double sign = (dir_ >= 0.f) ? 1.0 : -1.0;
+  if (wsolaOn_ && havePrev_ && freeze_ <= 0.01f && sign == prevSign_) {
+    const double rate = std::exp2(pitch_ / 12.0) * fileSR_ / devSR_;
+    const double n = static_cast<double>(left_.size());
+    start = std::fmod(std::fmod(start + wsolaOffset(start, sign, rate, len / 2), n) + n, n);
+  }
+  prevStart_ = start;
+  prevSign_ = sign;
+  havePrev_ = true;
   slot->pos = start;
-  slot->sign = (dir_ >= 0.f) ? 1.0 : -1.0; // Grains play backward too when reversed
+  slot->sign = sign; // Grains play backward too when reversed
   slot->age = 0;
   slot->len = len;
 
@@ -199,6 +267,7 @@ void AudioEngine::render(float *out, unsigned long frames) {
   const float tV = tGain_.load(std::memory_order_relaxed);
   const float tI = tInvert_.load(std::memory_order_relaxed);
   const float tFz = tFreeze_.load(std::memory_order_relaxed);
+  wsolaOn_ = tWsola_.load(std::memory_order_relaxed);
   const float tLp = tLp_.load(std::memory_order_relaxed);
   const float tHp = tHp_.load(std::memory_order_relaxed);
   const float tEL = tEnvL_.load(std::memory_order_relaxed);

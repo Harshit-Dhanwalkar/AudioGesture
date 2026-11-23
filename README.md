@@ -35,6 +35,16 @@ Grid is drawn from same numbers audio engine receives.
 White playhead shows where read head is inside current 4-second segment, i.e. where engine is sampling gain ramp.
 There is no decorative waveform: every pixel is either grid or measured audio (spectrum of signal leaving speakers, so stretch/pitch/reverse show up).
 
+## Time-stretch quality
+
+Grains are placed by waveform similarity (WSOLA): each new grain starts where the read head is, moved by up to
+15 ms to the spot that best continues the previous grain, so overlapping grains add up in phase. Measured on a
+pure tone stretched 0.6x, level ripple (std/mean of 5 ms RMS) drops from 0.34 to 0.02 and the level is no longer
+eaten by cancellation (0.145 -> 0.207, the unstretched level); a voiced-like signal at 1.5x goes from 0.29 to 0.08.
+It costs about 1% of the audio callback's time. Press `w` to compare with the old behaviour; `wsola = off` in the
+settings file makes that permanent. Only the measurable part is tested: how it _sounds_ on your music is for your
+ears.
+
 ## Recording and replaying hands
 
 `--record-trace session.trace` saves the hand data of a session (landmark coordinates only, never camera images);
@@ -78,6 +88,7 @@ CCs.
 | `v`       | Bars <-> mirrored bars                                                                                                                                               |
 | `p`       | Pitch from hand height on/off                                                                                                                                        |
 | `e`       | Effects (pinch freeze + roll filters) on/off                                                                                                                         |
+| `w`       | Phase-aligned grains (WSOLA) on/off, for A/B listening      |
 | `l`       | Low-light boost: auto -> on -> off                                                                                                                                   |
 | `t`       | Temporal denoise (part of boost) on/off                                                                                                                              |
 | `r`       | Start / stop recording what you hear to `recordings/*.wav`                                                                                                           |
@@ -143,6 +154,7 @@ make test-asan     # same under AddressSanitizer + UBSan
 | `test_onboarding`   | calibration countdown (needs both hands, restarts, fires once), help text covers every key, overlays draw and survive tiny frames, file picker order zenity -> kdialog -> none                                                                 |
 | `test_osc`          | OSC wire format byte by byte, per-frame message set, `--osc` target parsing, real UDP round trip on loopback                                                                                                                                   |
 | `test_trace`        | hand-trace record/replay round trip, malformed lines skipped, real-time pacing; mapper invariants on a scripted pull-together, 20 fuzzed sessions (dropouts, pinches, upside-down hands) and every `tests/data/*.trace`                        |
+| `test_stretch`      | time-stretch steadiness: level flutter of stretched tones/voiced signal with WSOLA vs plain overlap-add, level preserved, reverse and pitch shift, silence stays silent |
 | `test_latency`      | engine uses well under 50 % of the callback budget (prints the real figure), a gain gesture is audible within 150 ms but smoothed, hand data reaches the UI within a few ms                                                                    |
 | `test_threaded`     | newest-wins hand-over between tracking and UI threads, frame/state stay paired, end of stream, clean shutdown (also run under TSan in CI)                                                                                                      |
 | `test_grid`         | bars stay inside trapezium / triangle / inverted / twisted quad                                                                                                                                                                                |

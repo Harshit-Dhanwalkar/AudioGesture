@@ -52,8 +52,9 @@ int main() {
     for (const auto &l : helpLines()) {
       all += l + "\n";
     }
-    for (const char *k : {"c calibrate", "p pitch", "e effects", "s segment", "v bars", "r record",
-                          "l low-light", "t denoise", "d show", "q / Esc", "pinch", "upside down"}) {
+    for (const char *k :
+         {"w phase", "c calibrate", "p pitch", "e effects", "s segment", "v bars", "r record",
+          "l low-light", "t denoise", "d show", "q / Esc", "pinch", "upside down"}) {
       CHECK(all.find(k) != std::string::npos);
     }
   }
@@ -90,10 +91,14 @@ int main() {
   {
     auto world = [](bool zenity, bool kdialog, const std::string &answer) {
       return [=](const std::string &cmd) -> std::string {
-        if (cmd.rfind("command -v zenity", 0) == 0) return zenity ? "/usr/bin/zenity\n" : "";
-        if (cmd.rfind("command -v kdialog", 0) == 0) return kdialog ? "/usr/bin/kdialog\n" : "";
-        if (cmd.rfind("zenity", 0) == 0) return zenity ? answer : "";
-        if (cmd.rfind("kdialog", 0) == 0) return kdialog ? answer : "";
+        if (cmd.rfind("command -v zenity", 0) == 0)
+          return zenity ? "/usr/bin/zenity\n" : "";
+        if (cmd.rfind("command -v kdialog", 0) == 0)
+          return kdialog ? "/usr/bin/kdialog\n" : "";
+        if (cmd.rfind("zenity", 0) == 0)
+          return zenity ? answer : "";
+        if (cmd.rfind("kdialog", 0) == 0)
+          return kdialog ? answer : "";
         return "";
       };
     };
@@ -105,4 +110,3 @@ int main() {
 
   TEST_MAIN_END();
 }
-

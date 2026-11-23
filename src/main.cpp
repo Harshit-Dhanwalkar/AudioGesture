@@ -53,8 +53,7 @@ void usage(const char *exe) {
                "--replay f.trace] [--snapshot out.png] [--record out.wav]\n"
                "  keys: l low-light boost (auto/on/off)   v bars/mirrored   d show tracking ROI"
                "   c calibrate pose\n"
-               "  h help   p pitch on/off   e effects on/off   s segment length   t temporal "
-               "denoise   r record WAV   q/Esc quit\n",
+               "  h help   p pitch on/off   e effects on/off   w phase-aligned grains   s segment length   t temporal denoise   r record WAV   q/Esc quit\n",
                exe);
 }
 
@@ -404,6 +403,9 @@ int main(int argc, char **argv) {
     }
     if (k == 'e') {
       mapper.effectsOn = !mapper.effectsOn; // Pinch freeze + roll filters
+    }
+    if (k == 'w') {
+      mapper.wsolaOn = !mapper.wsolaOn; // Phase-aligned grains on/off (A/B listening)
     }
     if (k == 's') {
       mapper.cycleSegment();
