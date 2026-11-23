@@ -41,6 +41,13 @@ struct EngineParams {
   // random spray so it sounds like a pad, not a buzz)
   bool freeze = false;
 
+  // Waveform-similarity grain placement (WSOLA)
+  // Each new grain starts where read head is, nudged by up to ~15 ms to spot whose waveform best
+  // continues previous grain, so overlapping grains add up in phase instead of at random
+  // (which is what makes plain granular stretching sound phasey/flutter)
+  // Off = old behaviour, handy for A/B listening
+  bool wsola = true;
+
   // Filters after gain stage
   // Defaults mean "bypassed"
   float lpHz = 20000.f; // low-pass cutoff
@@ -110,7 +117,8 @@ private:
   static constexpr int kMaxGrains = 16;
 
   // Source audio, float
-  std::vector<float> left_, right_;
+  std::vector<float> left_;
+  std::vector<float> right_;
   double fileSR_ = 44100.0;
 
   // PortAudio
@@ -119,9 +127,19 @@ private:
   bool paInit_ = false;
 
   // Targets written by UI thread
-  std::atomic<float> tStretch_{1.f}, tGrain_{120.f}, tPitch_{0.f}, tDir_{1.f}, tGain_{0.8f},
-      tInvert_{1.f}, tEnvL_{1.f}, tEnvR_{1.f}, tSeg_{4.f}, tFreeze_{0.f}, tLp_{14.287f},
-      tHp_{4.322f}; // tLp_/tHp_ hold log2(cutoff Hz)
+  std::atomic<float> tStretch_{1.f};
+  std::atomic<float> tGrain_{120.f};
+  std::atomic<float> tPitch_{0.f};
+  std::atomic<float> tDir_{1.f};
+  std::atomic<float> tGain_{0.8f};
+  std::atomic<float> tInvert_{1.f};
+  std::atomic<float> tEnvL_{1.f};
+  std::atomic<float> tEnvR_{1.f};
+  std::atomic<float> tSeg_{4.f};
+  std::atomic<float> tFreeze_{0.f};
+  std::atomic<float> tLp_{14.287f};
+  std::atomic<float> tHp_{4.322f}; // tLp_/tHp_ hold log2(cutoff Hz)
+  std::atomic<bool>  tWsola_{true};
   std::atomic<double> headNorm_{0.0};
   std::atomic<float> segPhase_{0.f};
 
@@ -147,10 +165,16 @@ private:
   float aFast_ = 0.0;  // One-pole smoothing coefficients
   float freeze_ = 0.f; // 0 = playing, 1 = frozen (smoothed)
   float lpLog_ = 14.287f;
-  float hpLog_ = 4.322f; // smoothed log2(cutoff)
+  float hpLog_ = 4.322f; // Smoothed log2(cutoff)
   Biquad lp_[2];
-  Biquad hp_[2]; // per channel
+  Biquad hp_[2]; // Per channel
   int filtTick_ = 0;
+  // WSOLA state (audio thread only): where previous grain started and its direction
+  bool wsolaOn_ = true;
+  bool havePrev_ = false;
+  double prevStart_ = 0.0;
+  double prevSign_ = 1.0;
+  double wsolaOffset(double nominal, double sign, double rate, int hop) const;
   uint32_t rng_ = 0x9E3779B9u;
   float rand01() { // xorshift32, audio-thread only
     rng_ ^= rng_ << 13;

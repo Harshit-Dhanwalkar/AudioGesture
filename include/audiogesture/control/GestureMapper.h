@@ -31,6 +31,7 @@ public:
   float segSec = 4.0f;      // Seconds of audio held between hands
   bool pitchOn = false;
   bool effectsOn = true; // Pinch freeze + roll filters
+  bool wsolaOn = true;   // waveform-similarity grain placement (key w, for A/B listening)
 
   // Returns parameters to hand to AudioEngine::setParams()
   const EngineParams &update(const HandState &hs, double dt);
@@ -50,6 +51,7 @@ public:
 
   void applySettings(const Settings &st) {
     effectsOn = st.effects;
+    wsolaOn = st.wsola;
     restLength = st.restLength;
     refHeight = st.refHeight;
     segSec = st.segSec;
@@ -57,6 +59,7 @@ public:
   }
   void storeSettings(Settings &st) const {
     st.effects = effectsOn;
+    st.wsola = wsolaOn;
     st.restLength = restLength;
     st.refHeight = refHeight;
     st.segSec = segSec;

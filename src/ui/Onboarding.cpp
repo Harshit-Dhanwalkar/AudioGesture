@@ -31,8 +31,9 @@ std::vector<std::string> helpLines() {
       "  turn right palm edge-on\tlow-pass (muffle highs)",
       "",
       "c calibrate (hold pose 3 s) p pitch from height   e effects on/off",
-      "s segment length           v bars/mirrored       r record WAV",
-      "l low-light boost           d show tracking boxes t denoise",
+      "s segment length            v bars/mirrored       r record WAV",
+      "w phase-aligned grains      l low-light boost     d show tracking boxes",
+      "t denoise",
       "h or ? this help            q / Esc quit",
   };
 }
