@@ -118,9 +118,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: brew install cmake pkg-config opencv portaudio libsndfile
+        # run: brew install cmake pkg-config opencv portaudio libsndfile
+        run: brew install cmake pkg-config opencv@4 portaudio libsndfile
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        # run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DOpenCV_DIR="$(brew --prefix opencv@4)/lib/cmake/opencv4"
       - name: Build
         run: cmake --build build -j"$(sysctl -n hw.ncpu)"
       - name: Unit tests
