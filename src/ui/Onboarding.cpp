@@ -32,8 +32,8 @@ std::vector<std::string> helpLines() {
       "",
       "c calibrate (hold pose 3 s) p pitch from height   e effects on/off",
       "s segment length            v bars/mirrored       r record WAV",
-      "w phase-aligned grains      l low-light boost     d show tracking boxes",
-      "t denoise",
+      "w phase-aligned grains      l low-light boost     x pan from hand position on/off"
+      "d show tracking boxes       t denoise",
       "h or ? this help            q / Esc quit",
   };
 }

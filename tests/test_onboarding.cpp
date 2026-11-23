@@ -53,8 +53,8 @@ int main() {
       all += l + "\n";
     }
     for (const char *k :
-         {"w phase", "c calibrate", "p pitch", "e effects", "s segment", "v bars", "r record",
-          "l low-light", "t denoise", "d show", "q / Esc", "pinch", "upside down"}) {
+         {"w phase", "x pan", "c calibrate", "p pitch", "e effects", "s segment", "v bars",
+          "r record", "l low-light", "t denoise", "d show", "q / Esc", "pinch", "upside down"}) {
       CHECK(all.find(k) != std::string::npos);
     }
   }
